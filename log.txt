@@ -482,3 +482,110 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-24T23:49:31Z] Revise IMPLEMENTATION_PLAN Section B per review fixes
+
+User Prompt (verbatim, secrets redacted):
+Section B — Proposed Architecture
+
+B.1
+- PDF and image processing is unresolved. The plan identifies 4 PDFs and 11 PNGs, but the proposed standard-library core cannot extract all their contents. It offers pypdf and vision-model extraction as options.
+- The media cache needs a reproducibility contract. If evidence is extracted once and cached, the plan should define how that cache is generated, verified, and associated with the original evidence.
+- LLM use is optional but not fully specified. The plan allows an LLM fallback for difficult request intent. We still need to define when fallback is triggered and what happens if it is unavailable.
+Fix must be : retain the deterministic Python core, but finalize the media extraction approach before implementation. Otherwise, the audit engine may be built around incomplete evidence.
+
+B.2
+- There are many modules for a relatively small fixed dataset. This is acceptable if each module has a clear contract, but it increases integration work.
+- The plan puts evidence extraction caches under code/evaluation/, mixing production inputs with evaluation artifacts.
+- The layout shows docs/IMPLEMENTATION_PLAN.md alongside the code tree, but packaging must be checked against the challenge's exact ZIP rules.
+fix: Keep the modular design, but clearly distinguish runtime inputs, generated caches, evaluation-only data, and packaged deliverables.
+
+B.3
+Problem 1 — The intent classifier's position is unclear.
+
+The diagram allows a NOT_APPLICABLE request to bypass identity resolution and the remaining analysis. That may be fine for unambiguous non-deletion requests. But ambiguous wording requires a clear fallback rule so that a real deletion request isn't accidentally skipped.
+
+Problem 2 — The evidence index is a critical dependency.
+
+If M2 fails to extract a relevant resource, all later modules may behave correctly on an incomplete view of the evidence.
+
+A parser failure must therefore be visible to the decision engine, not silently interpreted as absence of data.
+
+Problem 3 — The diagram doesn't show failure handling.
+
+What happens when an identity is unresolved, an evidence file cannot be parsed, or two observations conflict? The architecture needs explicit error and uncertainty paths.
+
+these are the Questions you need to answer and give the reccomended fix.
+
+B.4
+Problem 1 — ResourceAssessment.state mixes different concepts.
+
+It permits values such as PRESENT, ABSENT, EXPOSED, ACTIVE, RESTORABLE, and UNOBSERVED.
+
+fix: Consider separating record existence, PII exposure, flow state, restore state and evidence completeness into independent properties.
+
+Problem 2 — A single state_obs may be insufficient.
+fix: Support multiple evidence references and an explanation of how they establish the conclusion.
+
+Problem 3 — compliant: bool | None is underspecified.
+fix: Define explicit uncertainty reasons and how each affects the final decision.
+
+B.5 — Module contracts
+
+module: M1 Loader
+problem: Validating schemas doesn't guarantee valid relationships between files
+fix: Add referential and timestamp consistency checks
+
+module: M2 Evidence parser
+problem: Parsing errors or omitted evidence could be invisible downstream
+fix: Return extraction coverage and failures
+
+module: M3 Identity resolver
+problem: UnresolvedSubject exists, but downstream behavior isn't fully defined
+fix: Specify the unresolved-identity decision path
+
+module: M4 Policy engine
+problem: Category classification includes confidence, but its effect isn't defined
+fix: Specify behavior for low-confidence or unmatched categories
+
+module: M5 Case scope
+problem: Incorrect case linkage could contaminate decisions
+fix: Record why each resource was included or excluded
+
+module: M6 State analyzer
+problem: Unknown evidence may lead to an unsupported compliant conclusion
+fix: Require evidence-completeness checks
+
+module: M7 Decision engine
+problem: Final status needs to handle uncertainty using only the permitted enums
+fix: Define conservative decision rules
+
+module: M8 Step builder
+problem: A citation might exist without proving the claimed state
+fix: Validate evidence relevance and meaning
+
+module: M9 Serializer
+problem: Structural validation alone won't catch incorrect audit reasoning
+fix: Add semantic checks where feasible
+
+module: M10 Evaluation
+problem: Sample evaluation could leak into production decisions
+fix: Enforce strict separation of evaluation data
+
+these are the problems and fixes from the section B.
+
+Agent Response Summary:
+Ran read-only probes: PDFs are ReportLab output with ASCII85+Flate content streams and plain (..) Tj literals, so a stdlib-only extractor recovered all text from all 4 PDFs (pypdf not needed); PNGs contain no text chunks (vision/OCR required); audit-log chains are fully consistent with the snapshot (302 chains, 0 breaks). Rewrote only Section B of docs/IMPLEMENTATION_PLAN.md: finalized PDF approach (stdlib), PNG approach (scripted hash-pinned vision cache, provider pending user approval, required before final run), three-way intent with no analysis bypass and held state, layout table separating runtime inputs/generated caches/evaluation-only/deliverables/scratch, failure-aware diagram, ExtractionReport coverage contract, failure-path table, independent assessment dimensions with multi-evidence Conclusions, uncertainty-reason effect table, and revised M1-M10 contracts. Sections A and C-J untouched; B.8 lists required alignments.
+
+Actions:
+* Edited docs/IMPLEMENTATION_PLAN.md (Section B replaced; other sections byte-identical)
+* Ran read-only scratchpad probes on dataset/evidence/documents/*.pdf, images/*.png chunk headers, and audit-log chain consistency
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+

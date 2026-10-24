@@ -388,153 +388,448 @@ Section A now overrides the following statements in later sections. They must be
 
 ## B. Proposed architecture
 
-### B.1 Technology [PROPOSAL]
+Section B implements the contracts of Section A: the verdicts of A.4.2, the completeness gate of A.4.5, the validator layers of A.5, and the single source of truth in A.3. Where B.1 changes an option described in Section C, B.8 lists the alignment.
 
-- **Python 3.13 standard library only for the core** [FACT: Python 3.13.9 and SQLite 3.50.4 available]: `csv`, `json`, `sqlite3`, `re`, `hashlib`, `datetime`, `dataclasses`, `unittest`.
-- Rationale: determinism, no install step for the grader, and no new third-party supply-chain surface.
-- **Media**: no PDF or image library is installed [FACT: `pypdf`, `fitz`, `PIL` not importable].
-  - Option M1 (recommended, needs approval): `pypdf` (pure Python, BSD) for the 4 text-based PDFs.
-  - Option M2: one-time vision-model extraction for the 11 PNGs (and PDFs, if M1 is declined). Output goes to a committed `.md`/`.py`-readable cache with provenance.
-  - Either option is a dependency/provider decision for the user.
-- **LLM use is minimal and optional**: (a) intent fallback for request texts not matched by deterministic rules; (b) media extraction. Both are cached and token-counted for `usage_report.md`. A run with zero LLM calls is valid and must be reported as such.
+### B.1 Technology and evidence-extraction decisions
 
-### B.2 Package layout [PROPOSAL]
+#### B.1.1 Deterministic core [PROPOSAL, decided]
+
+The core uses the Python 3.13 standard library only: `csv`, `json`, `sqlite3`, `re`, `hashlib`, `base64`, `zlib`, `struct`, `datetime`, `dataclasses`, `unittest`. [FACT] Python 3.13.9 and SQLite 3.50.4 are available.
+
+No third-party package is required for SQL, JSON, logs, TXT or PDF. No network call happens at run time unless the optional LLM fallback is explicitly enabled (B.1.4).
+
+#### B.1.2 PDF extraction: decided, standard library only
+
+[FACT, verified by a read-only probe on all 4 PDFs]:
+
+- The PDFs are generated documents.
+- Their page content streams use `/Filter [/ASCII85Decode /FlateDecode]`.
+- Their text is stored as plain literal strings drawn with `(…) Tj` operators.
+- The embedded ToUnicode CMaps cover single-byte codes `<00>`–`<7F>`.
+
+Decoding with `base64.a85decode` + `zlib` and parsing `(…) Tj` literals (handling PDF escapes `\n \r \t \b \f \( \) \\ \ddd`) recovered the full text of all 4 PDFs. The resource and user references found match the visual inspection:
+
+| PDF | References recovered |
+|---|---|
+| `support_001` attachment | `support_001` plus one email |
+| Disputed-orders register | `user_08`, `user_12`, `user_17`, `user_21`, `user_24`, `user_29` |
+| Compliance journal | `audit_record_003`, `user_03` |
+| Customer statement | `user_18` plus one email |
+
+Decision:
+
+- `evidence/pdf_parser.py` implements this extractor. **No `pypdf` dependency.**
+- The parser reports failure instead of guessing if a PDF uses an unsupported structure: other filters, hex/`TJ`-array text, or multi-byte CMaps. Future evidence would then show up as a coverage gap (B.3.2), not as silently missing data.
+
+#### B.1.3 PNG extraction: approach decided, provider pending
+
+[FACT] The 11 PNGs contain only `IHDR/IDAT/IEND` chunks, with no embedded text metadata. No OCR engine or image library is installed. Their content therefore requires OCR or a vision model.
+
+**Decided approach: one-time scripted vision extraction into a hash-pinned cache, with a fixed extraction schema.**
+
+Extraction tool, `code/tools/extract_media.py`. This is a separate command and is **not** part of the audit run.
+
+1. It computes the `sha256` of each PNG listed in `evidence_files.csv`.
+2. It sends the image to a vision model with the prompt `code/prompts/media_extraction.md`. The prompt asks for a fixed JSON schema: `records[]` with `resource_id`, `system_hint`, `fields{…}`, `identifiers[]`, `timestamps[]`, and `visible_text` verbatim. The model must transcribe, not infer.
+3. It writes one cache entry per file to `code/media_cache/<file_id>.json`.
+4. It appends a row to `code/media_cache/MANIFEST.md`.
+
+Each cache entry records:
+
+| Field | Purpose |
+|---|---|
+| `file_id`, `file_path`, `sha256` | Identify the original evidence |
+| `extractor` | Provider and model ID |
+| `prompt_sha256` | Pins the extraction prompt |
+| `extracted_at` | When the extraction ran |
+| `schema_version` | Version of the extraction schema |
+| `records` | The extracted data |
+| `review_status` | `unreviewed` / `spot_checked`, with the reviewer note |
+
+Rules:
+
+- **Reproducibility contract.** At audit run time the pipeline reads only the cache.
+  - It re-hashes each PNG and compares it to the cached `sha256`.
+  - A mismatch, a missing entry, or an unknown `schema_version` makes that file `EXTRACTION_FAILED` in the coverage report (B.3.2). It is never treated as an empty file.
+- **No manual transcription into the cache.** Human review may mark entries `spot_checked` and record discrepancies. Corrections are made by re-running extraction with a revised prompt, never by editing values.
+- **Provider and data-sharing approval.** The extraction sends dataset screenshots to an external service. Choosing the provider, model and key is a **user decision (Q-MEDIA-PROVIDER)**. The screenshots are fictional data, but sending data outward still needs approval.
+  - The `openai` SDK is already installed [FACT]. A different provider needs its SDK installed, which also needs approval.
+- **Gate.** The core pipeline (Stages 0–10) is built and evaluated without image facts. [FACT] No expected public-sample step cites a PNG, and every sample resource that appears in a PNG also appears in text evidence or activity rows.
+
+  However, the PNGs contain grounded links for **evaluation** subjects: `user_11`, `user_13`, `user_14`, `user_16`, `user_18`, `user_20`, `user_22`, `user_03`, `user_17`, and `marketing_001`. Therefore:
+  - the media cache is **required before the final 518-case run** (readiness checklist J);
+  - until then, every case whose subject has a PNG-only link is reported as affected by the coverage gap.
+
+#### B.1.4 LLM use for request intent: trigger and unavailability rules
+
+The intent classifier returns one of three results, never a bare boolean:
+
+| Result | Trigger (deterministic) | Recorded |
+|---|---|---|
+| `DELETION` | ≥1 deletion-intent pattern (delete / erase / remove / close + account / personal data; multilingual equivalents) **and** no explicit non-deletion pattern | matched phrases |
+| `NON_DELETION` | ≥1 explicit non-deletion pattern: an explicit negation of deletion ("not asking for deletion", "don't delete", "do not close", "not a request to erase", "without removing"), a limiting "only" clause, or a stated non-deletion purpose (correct, change, copy, download, information held, stop promotional, reset login) | matched phrases |
+| `UNSURE` | Neither pattern class matched, **both** classes matched in a way the precedence rules below do not resolve, or the text contains a script or language with no pattern coverage | reason |
+
+Precedence:
+
+- An explicit negation of deletion always wins over a deletion verb. "Remove me from marketing lists only" → `NON_DELETION`.
+- A limitation that keeps something ("you may keep backups", "keeping an internal reference is fine") does **not** negate deletion. [FACT: such wording appears in samples case_04, 17, 23, 31.]
+
+LLM fallback:
+
+- It is called **only** for `UNSURE`, and only if `AUDIT_LLM_ENABLED=1` and an API key is present in the environment.
+- The result is cached in `code/llm_cache/intent/<sha256(text)>.json`. The cache stores the model, prompt hash, raw answer and token counts, and is counted in `usage_report.md`.
+
+If the fallback is unavailable (disabled, no key, error):
+
+- the case keeps intent `UNSURE`;
+- it is **not** bypassed: full analysis still runs (B.3.1);
+- its final status is withheld by the readiness gate (J) until resolved.
+
+[FACT] On current inputs, all 508 deletion-style texts begin with one of 17 known openers, and the 10 non-deletion texts each contain an explicit negation. The expected `UNSURE` count is 0, and the run reports the actual count.
+
+`CLASSIFY_REQUEST` activities are claims. They are reported as a cross-check in evaluation and never used as decision input.
+
+### B.2 Repository and package layout
+
+The modular design is kept. Each directory below has exactly one role.
+
+| Path | Role | Packaged in `code.zip` | Who writes it | Read by production run |
+|---|---|---|---|---|
+| `code/main.py`, `code/audit/**` | **Production source** | yes | developer | — |
+| `code/prompts/*.md` | Prompts (intent fallback, media extraction) | yes [REQ: README "keep prompts in source code or Markdown"] | developer | only by tools / fallback |
+| `code/tools/extract_media.py` | **Generation tool** (not part of the audit run) | yes | developer | no |
+| `code/media_cache/` (`*.json`, `MANIFEST.md`) | **Generated runtime input**, hash-pinned to evidence | yes, so the run is reproducible without network | `extract_media.py` only | yes (read-only) |
+| `code/llm_cache/` | **Generated runtime input** (intent fallback answers) | yes | pipeline in fallback mode only | yes (read-only unless fallback enabled) |
+| `code/evaluation/main.py`, `code/evaluation/custom_cases/` | **Evaluation only** | yes | developer | **never** (A.1.2) |
+| `code/evaluation/*.md` (reports, sample analysis) | **Deliverables** | yes [A.7.1] | evaluator + developer narrative | never |
+| `code/tests/` | Tests | yes | developer | no |
+| `runs/` (repo root, git-ignored) | **Scratch run artifacts**: explain traces, coverage reports, run summaries | **no** (contain dataset identifiers, A.7.3) | pipeline | no |
+| `output.csv` (repo root) | **Submission artifact** | separate upload | pipeline | no |
+| `docs/IMPLEMENTATION_PLAN.md` | Planning document | **not by default.** The README zip command packs only `README.md` and `code` [FACT]. Inclusion is **Q-DOCS-ZIP**. | developer | no |
+| `dataset/` | Challenge input | **never** [REQ] | organizers | yes (read-only) |
+
+Import rules, enforced by a test:
+
+- `code/audit/**` may not import from `code/evaluation/**`, `code/tests/**` or `code/tools/**`.
+- `code/tools/**` may import `code/audit/config.py` and the parsers.
+
+Module tree:
 
 ```text
 code/
-  main.py                      # CLI entry: python code/main.py [--requests PATH] [--out PATH] [--cases ...] [--explain]
+  main.py                    # CLI: python code/main.py [--requests PATH] [--out PATH] [--cases ...] [--run-dir runs/<ts>]
   audit/
-    __init__.py
-    config.py                  # paths, feature flags (see I.), enum tables
-    models.py                  # dataclasses (B.4)
-    loader.py                  # M1
+    config.py                # OPERATIONS, TREATMENTS, flags, system maps, sort key (A.2.1, A.3)
+    models.py                # B.4 data model
+    errors.py                # error and uncertainty enums (B.3.3, B.4.3)
+    loader.py                # M1
     evidence/
-      sql_parser.py            # M2a
-      json_parser.py           # M2b
-      log_parser.py            # M2c
-      text_parser.py           # M2d
-      media.py                 # M2e (cache reader + optional extractor)
-      normalize.py             # identifier extraction, field canonicalisation
-      index.py                 # Observation index
-    identity.py                # M3
-    policy.py                  # M4
-    scope.py                   # M5 (case scoping + admissibility)
-    state.py                   # M6
-    intent.py                  # part of M7
-    decision.py                # M7
-    steps.py                   # M8
-    serializer.py              # M9
-    runlog.py                  # M10 (explain traces, usage counters)
-  prompts/
-    intent_classifier.md
-    media_extraction.md
-  evaluation/
-    main.py                    # scorer against sample_output.csv (M10)
-    custom_cases/              # synthetic fixtures (G.5)
-    evaluation_report.md
-    usage_report.md
-    sample_case_analysis.md    # exists
+      sql_parser.py  json_parser.py  log_parser.py  text_parser.py
+      pdf_parser.py          # B.1.2
+      media_cache.py         # B.1.3 reader + hash verification
+      normalize.py           # identifier extraction / canonicalisation
+      index.py               # ObservationIndex + ExtractionReport
+    identity.py              # M3
+    policy.py                # M4
+    scope.py                 # M5
+    state.py                 # M6
+    intent.py                # B.1.4
+    decision.py              # M7
+    steps.py                 # M8
+    serializer.py            # M9 (L1–L4 validator)
+    runlog.py                # M10 runtime part: explain trace, coverage, usage counters
+  tools/extract_media.py
+  prompts/{intent_classifier.md, media_extraction.md}
+  media_cache/   llm_cache/
+  evaluation/{main.py, custom_cases/, evaluation_report.md, usage_report.md, sample_case_analysis.md}
   tests/
-    test_*.py                  # unittest
-docs/IMPLEMENTATION_PLAN.md
 ```
 
-### B.3 Pipeline diagram
+### B.3 Pipeline, failure handling and data flow
 
 ```mermaid
 flowchart TD
-  subgraph Inputs
+  subgraph Inputs["Runtime inputs (read-only)"]
     RQ[deletion_requests.csv]
-    UI[user_identities.csv]
-    AL[user_audit_log.csv]
+    ID[user_identities.csv + user_audit_log.csv]
     SA[system_activity.csv]
     DR[deletion_rules.csv]
     EF[evidence_files.csv]
-    EV[(evidence/**)]
+    EV[(dataset/evidence/**)]
+    MC[(code/media_cache)]
   end
-  RQ & UI & AL & SA & DR & EF --> M1[M1 Loader + schema validation]
-  EV --> M2[M2 Evidence parsers + normalizer]
+
+  RQ & ID & SA & DR & EF --> M1[M1 Loader: schema + referential + time checks]
+  M1 -- "SchemaError" --> ABORT[[Abort run: no output written]]
+  EV & MC --> M2[M2 Parsers + normalizer]
   M1 --> M2
   M2 --> IDX[(Observation index)]
+  M2 --> COV[(ExtractionReport: per-file status + gaps)]
+
+  M1 --> INT{M7a Intent: DELETION / NON_DELETION / UNSURE}
+  INT -- "UNSURE" --> LLM[Optional LLM fallback, cached]
+  LLM --> INT2{Resolved?}
+
   M1 --> M3[M3 Identity resolver]
-  M1 --> INT[M7a Intent classifier]
-  INT -->|NOT_APPLICABLE| M8
-  M3 --> M5[M5 Case scope + cutoff admissibility]
-  IDX --> M5
-  SA --> M5
-  M5 --> M4[M4 Resource classification + policy]
+  M3 -- "UnresolvedSubject" --> M5
+  M3 --> M5[M5 Scope + admissibility: include/exclude with reasons]
+  IDX & SA --> M5
+  COV --> M5
+  M5 --> M4[M4 Classification + policy]
   DR --> M4
-  M4 --> M6[M6 Deletion-state + data-flow analyzer]
+  M4 --> M6[M6 State analyzer: per-dimension conclusions]
   M5 --> M6
-  M6 --> M7[M7 Decision engine]
-  M7 --> M8[M8 Steps + citation builder]
-  M8 --> M9[M9 Serializer + output validator]
+  COV --> M6
+  M6 --> M7[M7 Decision: verdicts + completeness gate]
+  INT -- "intent result" --> M7
+  INT2 -- "result or still UNSURE" --> M7
+  M7 -- "COMPLETE / INCOMPLETE / NOT_APPLICABLE" --> M8[M8 Steps + citations]
+  M7 -- "UNDETERMINED / UNSURE / ERROR" --> HOLD[(Held cases list)]
+  M8 --> M9[M9 Serializer + L1-L4 validator]
+  M9 -- "validation errors" --> HOLD
   M9 --> OUT[output.csv]
-  M3 & M5 & M6 & M7 --> M10[M10 Run log / explain / usage]
-  OUT --> EVAL[evaluation/main.py vs sample_output.csv]
+  HOLD --> GATE{{Readiness gate J: held cases must be zero or explicitly decided}}
+  GATE --> OUT
+  M3 & M5 & M6 & M7 & M9 & COV --> M10[(runs/: explain trace, coverage, summary, usage)]
+  OUT -. "evaluation only" .-> EVAL[code/evaluation/main.py vs sample_output.csv]
 ```
 
-Data flow: the evidence index is built **once** for all cases. Everything after M3 runs per case and is pure: `(case, index, activities, identities, rules) → CaseResult`. M10 records an explain trace per case (links used, admissibility decisions, chosen citations), so every decision can be audited.
+Data flow:
 
-### B.4 Core data model [PROPOSAL]
+1. M1 validates all inputs. Any error aborts before processing.
+2. M2 builds the observation index **once**, plus an `ExtractionReport`.
+3. Per case:
+   - intent;
+   - identity, which always runs;
+   - scope;
+   - classification;
+   - state;
+   - decision.
+4. Cases with an emittable status go to M8/M9.
+5. Cases that cannot be decided within the permitted enums go to the **held list**. `output.csv` is written only when the held list is empty or every held case has an explicit, documented decision (A.4.5, J).
+
+#### B.3.1 Q1: where does intent sit, and can a real deletion request be skipped?
+
+Answer:
+
+- Intent is computed first, but it **never short-circuits analysis**.
+- Identity, scope, state and decision run for every case. The intent result only changes what M7 is allowed to emit.
+
+| Intent | M7 behaviour |
+|---|---|
+| `DELETION` | Normal decision |
+| `NON_DELETION` (explicit matched phrase recorded) | Emit `NOT_APPLICABLE`, `[]`. The analysis is kept in the explain trace. |
+| `UNSURE` after fallback, or fallback unavailable | Case is **held** (UNSURE_INTENT). It is not emitted as NOT_APPLICABLE and not emitted as a deletion decision until resolved. |
+
+Recommended fix:
+
+- The three-way classifier from B.1.4.
+- `NOT_APPLICABLE` only when an explicit non-deletion phrase is matched.
+- No bypass of analysis.
+- A held state for ambiguity.
+
+This prevents a real deletion request from being skipped silently. It also avoids emitting deletion steps for a request that did not authorise deletion.
+
+#### B.3.2 Q2: how is an extraction failure kept visible?
+
+Answer: M2 returns an `ExtractionReport` alongside the index. Downstream modules consult it explicitly.
+
+```text
+FileExtraction { file_id, format, status: OK | PARTIAL | FAILED,
+                 observations: int, unparsed_units: int, unparsed_samples: [str],
+                 known_noise_units: int, reasons: [str] }
+```
+
+- `OK`: every unit (row, record, state-bearing log line, PDF text run, cache entry) was parsed.
+- `PARTIAL`: some units were not understood. Log lines whose event is on the known-noise list (e.g. `connection_acquired`, `dependency_retry`, `timer_tick`) are counted separately and do **not** make a file PARTIAL.
+- `FAILED`: the file could not be parsed. Examples: SQL error, invalid JSON, unsupported PDF structure, media cache missing or hash mismatch.
+
+Effects:
+
+- **M5** records `coverage_gaps` per case: every `FAILED`/`PARTIAL` file that is admissible for the case (by capture time).
+- **M6**:
+  - A snapshot from a `FAILED`/`PARTIAL` file **cannot** prove absence by omission.
+  - A resource whose only potential evidence lies in a gap file gets uncertainty reason `EVIDENCE_GAP`.
+  - Absence of data is never inferred from a failed parse.
+- **Run-level:** the run summary lists every non-OK file. The final run (J) requires:
+  - zero `FAILED` text-evidence files;
+  - every `PARTIAL` file reviewed;
+  - the media cache complete and hash-valid.
+
+Recommended fix:
+
+- Treat coverage as data, not logging.
+- Forbid omission proofs from incomplete files.
+- Block final generation on unexplained gaps.
+
+#### B.3.3 Q3: what happens on unresolved identity, parse errors, conflicts and exceptions?
+
+| Situation | Detection | Path | Effect on output |
+|---|---|---|---|
+| Input schema/referential error | M1 | Abort run | No `output.csv` written |
+| Evidence file unparsable | M2 `FAILED` | Coverage gap (B.3.2) | Affected resources `UNKNOWN(EVIDENCE_GAP)`; run blocked at J until fixed |
+| Identity unresolved (request email in neither snapshot nor audit log) | M3 → `UnresolvedSubject` | Scope from the request email and its computed `sha256` only; uncertainty `IDENTITY_UNRESOLVED` | Findings are allowed only where the email itself is grounded. A COMPLETE answer is impossible: the primary account cannot be proven without a subject, so the gate fails and the case is held. [FACT: 0 such cases in current inputs] |
+| Resource grounded to the subject **and** to another subject | M5 | Kept in scope (e.g. a shared support conversation) with reason `SHARED_RESOURCE` | Treatment per category (rule_05 REDACT for shared messages) |
+| Resource grounded only to another subject | M5 | Excluded with reason `LINKED_TO_OTHER_SUBJECT` | None |
+| Two admissible observations of the same resource and copy at the same observation time with different states | M6 | Conclusion `UNKNOWN(CONFLICTING_OBSERVATIONS)` with both refs | Blocks COMPLETE; no finding |
+| Observations at different times | M6 | Latest admissible wins; earlier ones kept as `superseded` refs | Normal |
+| Grounded observation contradicts a catalog claim (`LINK_RESOURCE_IDENTITY`) | M5 | Grounded wins; conflict logged | Normal |
+| Category ambiguous across treatments | M4 | `UNKNOWN(CATEGORY_AMBIGUOUS)` | No finding (the operation cannot be chosen); blocks COMPLETE |
+| Exception inside one case | M7 wrapper | Case result `ERROR` + traceback in `runs/` | Held; the final run requires zero errors |
+| Validator L1–L4 failure | M9 | Case moved to held list with the failing rule | Held |
+
+### B.4 Core data model
+
+#### B.4.1 Evidence references (multiple, with roles)
 
 ```python
 @dataclass(frozen=True)
-class Observation:
-    obs_id: str                 # f"{file_id}#{locator}"
-    file_id: str                # evidence_NN
-    file_captured_at: datetime  # from evidence_files.csv (validated against in-file header)
-    observed_at: datetime | None  # inner time (observed_at/recorded_at/snapshot captured_at/log line ts); None if absent
-    time_basis: str             # "inner" | "file"
-    source_format: str          # sql|json|log|text|pdf|image
-    locator: str                # table / collection path / trace_id / line no
-    copy_location: str          # e.g. "account_service:customer_profiles:failover_replica"
-    system_id: str | None       # explicit system/data_store/origin_system/service, else None
-    resource_id: str            # primary resource the observation describes
-    related_ids: tuple[str,...] # foreign keys (e.g. source_resource_id)
-    record_type: str | None     # explicit record_type or None
-    collection: str | None
-    fields: dict                # canonical field -> value (email, phone, email_hash, customer_reference, enabled, restore_allowed, rows, status_code, result, ...)
-    identifiers: frozenset      # {("email",v),("phone",v),("hash",v),("user",v)} incl. those found in free text
-    presence: str               # PRESENT | ABSENT | UNKNOWN (what this observation says about existence)
-    anomalies: tuple[str,...]   # e.g. "observed_after_capture"
+class EvidenceRef:
+    kind: str                 # "observation" | "activity" | "audit_log" | "omission_snapshot"
+    ref_id: str               # obs_id / activity_id / audit_id
+    file_id: str | None       # citable id for observations / omission snapshots
+    file_captured_at: datetime | None
+    observed_at: datetime | None
+    locator: str              # table / json path / trace id / line
+    role: str                 # PROOF | CONTRARY | SUPERSEDED | LINK | CLAIM | CONTEXT
+    admissible: frozenset     # subset of {"state", "citation", "link"} for THIS case's audit_at
+```
 
-@dataclass(frozen=True)
-class Activity:      # one row of system_activity.csv — always a CLAIM
-    activity_id: str; event_time: datetime; event_type: str; source_system: str
-    target_system: str; resource_id: str; reported_result: str; details: str
+`Observation` and `Activity` are as in the earlier draft, with `observed_at` and `file_captured_at` kept separate (A.4.4).
 
+#### B.4.2 Independent assessment dimensions
+
+The single mixed `state` is replaced by independent dimensions. Each dimension is a `Conclusion`:
+
+```python
 @dataclass
-class Subject:
-    user_id: str; request_email_kind: str  # current|historical
-    emails: dict[str, tuple[datetime|None, datetime|None]]  # value -> validity window
-    phones: dict; hashes: dict
+class Conclusion:
+    value: str                       # dimension-specific enum, always including "UNKNOWN" and "NOT_APPLICABLE"
+    evidence: list[EvidenceRef]      # all refs used: PROOF + CONTRARY + SUPERSEDED + CLAIM
+    derivation: str                  # rule id + human-readable explanation, e.g.
+                                     # "S-ABSENT-NAMED: latest admissible obs evidence_92#account_service.profile_lookups[3] status_code=404"
+    uncertainty: list[str]           # UncertaintyReason values (B.4.3); empty iff value is decided
 
 @dataclass
 class ResourceAssessment:
-    resource_id: str; system_id: str; category: str; category_basis: str
-    required_action: str        # DELETE|REDACT|ANONYMIZE|RETAIN|TOMBSTONE_REDACT|DISABLE_FLOW|BLOCK_RESTORE
-    link_strength: str          # GROUNDED|CATALOG|WORKFLOW (see C.5)
-    state: str                  # PRESENT|ABSENT|EXPOSED|REDACTED|ANONYMIZED|ACTIVE|DISABLED|RESTORABLE|BLOCKED|UNOBSERVED
-    state_obs: Observation | None   # admissible observation proving state
-    compliant: bool | None
-    claims: list[Activity]      # never used as proof
+    resource_id: str
+    system_id: str                        # canonical owning system
+    scope: ScopeDecision                  # included/excluded + reasons + link refs (M5)
+    category: Conclusion                  # value = deletion_rules category; derivation shows precedence step used
+    existence: Conclusion                 # PRESENT | ABSENT | UNKNOWN            (per copy below)
+    copies: dict[str, Conclusion]         # copy_location -> PRESENT | ABSENT | UNKNOWN
+    pii_exposure: Conclusion              # EXPOSED | CLEAN | NOT_APPLICABLE | UNKNOWN
+    flow_state: Conclusion                # ENABLED | DISABLED | NOT_APPLICABLE | UNKNOWN
+    restore_state: Conclusion             # RESTORABLE | BLOCKED | NOT_APPLICABLE | UNKNOWN
+    retention_condition: Conclusion       # TRUE | FALSE | NOT_APPLICABLE | UNKNOWN (A.4.3)
+    evidence_completeness: Conclusion     # COMPLETE | PARTIAL | NONE (+ gaps) — derived from coverage
+    verdict: Verdict                      # computed, see below
 ```
+
+The verdict is computed from `TREATMENTS[category]` and only the dimensions that treatment needs:
+
+| Required treatment | Dimensions consulted | COMPLIANT_PROVEN when | VIOLATION_PROVEN when |
+|---|---|---|---|
+| DELETE | existence (all copies) | ABSENT in every known copy | PRESENT in any copy |
+| REDACT / TOMBSTONE | existence, pii_exposure | PRESENT and CLEAN (or ABSENT) | PRESENT and EXPOSED |
+| ANONYMIZE | existence, pii_exposure | CLEAN (or ABSENT) | EXPOSED |
+| RETAIN | retention_condition, existence | condition TRUE and PRESENT | condition TRUE and ABSENT (no output operation; A.4.3) |
+| BLOCK_RESTORE | restore_state | BLOCKED | RESTORABLE |
+| DISABLE_FLOW | flow_state | DISABLED | ENABLED |
+
+Any consulted dimension `UNKNOWN` ⇒ verdict `UNKNOWN`, with the union of its uncertainty reasons.
+
+```python
+@dataclass
+class Verdict:
+    value: str            # COMPLIANT_PROVEN | VIOLATION_PROVEN | UNKNOWN   (A.4.2)
+    reasons: list[str]    # UncertaintyReason values when UNKNOWN
+    proof: list[EvidenceRef]   # refs with role PROOF and "citation" admissible (may be several)
+    citation: EvidenceRef | None  # the single ref chosen for evidence_id per F.2 rules
+```
+
+Multiple proofs are kept. `citation` is the one chosen for output. The others remain in the explain trace, and L3 validation (A.5) checks the chosen one.
+
+#### B.4.3 Uncertainty reasons and their effect on the decision
+
+Defined once in `errors.py`.
+
+| Reason | Meaning | Verdict | Finding? | Effect on case |
+|---|---|---|---|---|
+| `NO_ADMISSIBLE_OBSERVATION` | No observation admissible for state | UNKNOWN | no | Blocks COMPLETE; listed as a future check in INCOMPLETE |
+| `CLAIMS_ONLY` | Only activities / `reported_status` | UNKNOWN | no | as above |
+| `POST_CUTOFF_ONLY` | Evidence exists only after `audit_at` | UNKNOWN | no | as above |
+| `OBSERVED_AFTER_CAPTURE` | The only relevant observation is dated after its file capture and after `audit_at` | UNKNOWN | no | as above |
+| `NONQUALIFYING_OMISSION` | Missing from a snapshot without declared coverage | UNKNOWN | no | as above |
+| `EVIDENCE_GAP` | Relevant file FAILED/PARTIAL | UNKNOWN | no | as above; also run-level gate |
+| `CONFLICTING_OBSERVATIONS` | Same time, different states | UNKNOWN | no | as above |
+| `CATEGORY_AMBIGUOUS` | Treatment cannot be chosen | UNKNOWN | no | as above |
+| `RETENTION_CONDITION_UNKNOWN` | Retention field not observed | UNKNOWN | no | as above |
+| `RETAINED_RECORD_MISSING` | Required retained record proven absent | VIOLATION_PROVEN | **no operation exists** | Blocks COMPLETE; case held unless other findings make it INCOMPLETE; reported (Q-RETAIN) |
+| `WEAK_LINK_ONLY` | Workflow-correlation link only (C.6) | not in `REQ(case)` | no | Logged as unresolved scope; does not block COMPLETE (A.4.5) |
+| `IDENTITY_UNRESOLVED` | Case-level | — | — | B.3.3 row |
+
+The case decision (M7) follows A.4.5:
+
+- any expressible `VIOLATION_PROVEN` → INCOMPLETE;
+- else all of `REQ(case)` COMPLIANT_PROVEN with a citation → COMPLETE;
+- else UNDETERMINED (held).
 
 ### B.5 Module contracts
 
-| # | Module | Responsibility | Inputs | Outputs / interface |
+| # | Module | Responsibility | Inputs → Outputs | Failure / uncertainty contract (review fix) |
 |---|---|---|---|---|
-| M1 | `loader.py` | Read CSVs (UTF-8), validate headers and enums, parse ISO-8601 `Z` timestamps to aware UTC, check uniqueness (`case_id`, `user_id`, `file_id`, `activity_id`), check every manifest path exists. | `dataset/` | `Dataset` object; raises `SchemaError` with file+row. |
-| M2 | `evidence/*` | Parse every evidence file into `Observation`s; extract identifiers from structured fields **and** free text; record inner vs file time; flag anomalies. | manifest rows, files | `ObservationIndex` with lookups `by_resource`, `by_identifier`, `by_trace`, `by_file`; `scoped_snapshots` (C.8). |
-| M3 | `identity.py` | Resolve the request email to a `user_id` (current or historical) and build the full identifier set with validity windows. | request, identities, audit log | `Subject` or `UnresolvedSubject`. |
-| M4 | `policy.py` | Classify each resource into a `deletion_rules.csv` category and derive the required action and condition evaluation. | `Observation`s, activities, rules | `classify(resource) -> (category, basis, confidence)`; `required_action(category, context)`. |
-| M5 | `scope.py` | Decide which resources belong to this case (links + episode boundary) and which observations are admissible for linking and for state proof. | subject, index, activities, request, other requests | `CaseScope{resources: {rid: LinkInfo}, excluded: {rid: reason}}`; `admissible_for_state(obs, audit_at)`, `admissible_for_link(obs, audit_at)`. |
-| M6 | `state.py` | Per in-scope resource, determine state at `audit_at` from admissible observations (replica-aware, omission-aware) and whether it is compliant. | scope, index, policy | `list[ResourceAssessment]`. |
-| M7 | `intent.py` + `decision.py` | Authorisation check; final status. | request text, assessments | `Decision{status, findings, remediation, verification}`. |
-| M8 | `steps.py` | Build steps from the decision, choose citations, sort, number. | `Decision` | `list[Step]`. |
-| M9 | `serializer.py` | Serialize to CSV/JSON deterministically; validate the whole file. | all case results | `output.csv`; `validate_output(path) -> list[Error]`. |
-| M10 | `runlog.py`, `evaluation/main.py` | Explain traces, LLM usage counters, sample scoring, report generation. | results, `sample_output.csv` (eval only) | `run_explain.jsonl` (scratch, not packaged), metrics tables for `evaluation_report.md`, `usage_report.md`. |
+| M1 | `loader.py` | Schema (A.1.4) **plus referential and timestamp consistency** | `dataset/` → `Dataset` | Referential and consistency checks, listed below. Errors abort; warnings go to the run summary. |
+| M2 | `evidence/*` | Parse all evidence into `Observation`s; normalise identifiers; keep capture vs observation time | manifest, files, media cache → `ObservationIndex`, **`ExtractionReport`** | Returns per-file status, counts, unparsed samples and reasons (B.3.2). Never returns "no data" for a failed file. |
+| M3 | `identity.py` | Subject + identifier set with provenance | request, identities, audit log → `Subject` \| `UnresolvedSubject` | Defined unresolved path (B.3.3). Validity windows kept for explanation only. |
+| M4 | `policy.py` | Category + treatment from `TREATMENTS` | observations, activities, rules → `category: Conclusion` | Precedence (D.1) recorded in `derivation`. **Confidence rules:** (a) explicit `record_type` or collection mapping = decided; (b) content-feature or workflow-hint classification is accepted only if every competing category has the same treatment chain, otherwise `CATEGORY_AMBIGUOUS`; (c) prefix-only or unmatched → `CATEGORY_AMBIGUOUS`. Ambiguity never defaults to a "safe" category. |
+| M5 | `scope.py` | Which resources belong to the case; admissibility per ref | subject, index, activities, coverage, all requests → `ScopeDecision` per candidate | **Every candidate gets an include/exclude decision** with reason codes: `GROUNDED_DIRECT`, `GROUNDED_TRACE`, `GROUNDED_FK`, `CATALOG`, `WEAK_LINK_ONLY`, `SHARED_RESOURCE`, `LINKED_TO_OTHER_SUBJECT`, `EARLIER_EPISODE`, `LINK_EVIDENCE_POST_CUTOFF`, `AMBIGUOUS_WORKFLOW`. Each code comes with `EvidenceRef`s. Excluded candidates are kept in the explain trace. |
+| M6 | `state.py` | Per-dimension conclusions and verdict | scope, index, coverage, `TREATMENTS` → `ResourceAssessment[]` | **Evidence-completeness check per resource.** A compliant verdict requires PROOF refs admissible for state and citation, and no `EVIDENCE_GAP` on the dimension. UNKNOWN is never upgraded to compliant (A.4.2). |
+| M7 | `decision.py`, `intent.py` | Intent + completeness gate | intent, assessments → `CaseDecision{status ∈ {COMPLETE, INCOMPLETE, NOT_APPLICABLE} \| held(reason)}` | **Conservative rules:** only the A.4.5 gate. UNDETERMINED / UNSURE / ERROR become held, never mapped to an enum implicitly. Each emitted status lists the verdicts that justify it. |
+| M8 | `steps.py` | Steps from `TREATMENTS`; citation choice | `CaseDecision` → `Step[]` | **Citation relevance:** the chosen ref must be in `verdict.proof`, admissible for citation, name the resource (or be its qualifying omission snapshot), and support the step's state. Otherwise the step is not emitted and the case is held (`CITATION_UNSUPPORTED`). |
+| M9 | `serializer.py` | CSV/JSON writing; L1–L4 validation | case results + `output.csv` → errors | **Semantic checks** L3/L4 (A.5) use the internal case results. Writes `output.csv` only when there are zero errors and zero undecided held cases. |
+| M10 | `runlog.py` (runtime), `code/evaluation/main.py` (evaluation) | Explain trace, coverage report, usage counters; sample scoring, report generation | results → `runs/<ts>/…`; evaluator → `code/evaluation/*.md` | **Strict separation:** the runtime part never reads `sample_output.csv`. The evaluator imports production code but not vice versa (import-rule test, B.2). Reference answers are read only inside the evaluator; feature flags are set by documented decisions, not by evaluator output at run time (A.1.2). |
+
+M1 referential and consistency checks:
+
+- Every audit-log `user_id` exists.
+- **Audit-log chain consistency** per (user, field): sorted by `event_time`, each `old_value` equals the previous `new_value`, and the last `new_value` equals the snapshot value. [FACT: 302 chains, 0 breaks, 0 mismatches; no change is later than the snapshot's `updated_at`.]
+- `email_hash` matches `sha256(lower(email))`.
+- Every request has `requested_at ≤ reported_at ≤ audit_at`.
+- Manifest paths are valid and complete (A.1.4).
+- Every evidence `captured_at` lies within [earliest, latest] request/audit window ± a configured margin; a value outside is a warning.
+- The SQL in-file capture header equals the manifest.
+
+### B.6 Determinism
+
+- No wall-clock time or randomness in decisions.
+- All iteration is over sorted keys.
+- JSON is serialized with fixed key order.
+- Caches are keyed by content hashes.
+- Two runs with identical inputs and caches must produce byte-identical `output.csv` (checked in J).
+
+### B.7 What this section answers from the Section B review
+
+| Review item | Where answered |
+|---|---|
+| B.1 PDF/PNG unresolved; cache reproducibility; LLM fallback trigger and unavailability | B.1.2, B.1.3, B.1.4 |
+| B.2 module count; caches mixed with evaluation; docs vs packaging | B.2 table and import rules (caches moved out of `code/evaluation/`) |
+| B.3 Q1 intent position | B.3.1 |
+| B.3 Q2 index as critical dependency | B.3.2 |
+| B.3 Q3 failure handling | B.3.3 + diagram held path |
+| B.4 mixed state; single `state_obs`; underspecified `compliant` | B.4.2, B.4.1, B.4.3 |
+| B.5 per-module contract fixes M1–M10 | B.5 |
+
+### B.8 Alignment needed in later sections (not edited in this revision)
+
+- **C.1:** the PDF row becomes "standard-library extractor (B.1.2)". The media option list (M1 `pypdf` / M2 vision) is replaced by B.1.2–B.1.3. The cache path moves from `code/evaluation/media_extractions.md` to `code/media_cache/`.
+- **C.5/C.6:** use the M5 reason codes. "Other-subject exclusion" applies only when the resource is not also grounded to this subject (`SHARED_RESOURCE`).
+- **E:** pseudocode must use `ResourceAssessment` dimensions, `Verdict`, the held path and the B.3.1 intent handling.
+- **F.2:** citation choice reads `verdict.proof` and `verdict.citation`.
+- **G:** add tests for `ExtractionReport` effects, B.3.3 rows, import rules, and media cache hash mismatch.
+- **H:** add a "PDF stdlib extractor" stage. Media cache generation stays after Stage 10, but becomes a precondition of Stage 13.
+- **I/J:** add Q-MEDIA-PROVIDER and Q-DOCS-ZIP, the held-cases gate, and the coverage gate.
 
 ---
 
