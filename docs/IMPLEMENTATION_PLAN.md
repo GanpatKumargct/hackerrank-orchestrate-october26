@@ -16,36 +16,106 @@ Labels used throughout:
 
 ## A. Challenge requirements
 
-### A.1 Inputs [REQ: `problem_statement.md`, `AGENTS.md` §6.1–6.2, `README.md`]
+This section has two kinds of content:
 
-| File | Rows [FACT] | Columns | Role |
+- **Explicit requirements** (A.1–A.3, A.7), each tied to the repository file that states it.
+- **Correctness contracts** (A.4–A.6) derived from those requirements. These contracts bind every later section.
+
+A.8 lists decisions and items that are still open. A.9 lists the places in Sections B–J that must be brought in line with this section.
+
+### A.1 Inputs and input contract
+
+#### A.1.1 Input files [REQ: `problem_statement.md` "Files Provided", `AGENTS.md` §6.1–6.2; counts FACT]
+
+| File | Rows | Columns | Role |
 |---|---|---|---|
-| `dataset/deletion_requests.csv` | 518 | `case_id,email,requested_at,reported_status,reported_at,audit_at,request_text` | Cases to answer (`case_33`–`case_550`) |
-| `dataset/sample_deletion_requests.csv` | 32 | same | Public samples (`case_01`–`case_32`) |
-| `dataset/sample_output.csv` | 32 | `case_id,deletion_status,steps_json` | Reference answers — **evaluation only** |
+| `dataset/deletion_requests.csv` | 518 | `case_id,email,requested_at,reported_status,reported_at,audit_at,request_text` | Cases to answer (`case_33`–`case_550`, contiguous) |
+| `dataset/sample_deletion_requests.csv` | 32 | same | Public sample inputs (`case_01`–`case_32`) |
+| `dataset/sample_output.csv` | 32 | `case_id,deletion_status,steps_json` | Reference answers. **Evaluation only** (A.1.2). |
 | `dataset/user_identities.csv` | 850 | `user_id,name,email,phone,email_hash,updated_at` | Current identity snapshot |
-| `dataset/user_audit_log.csv` | 306 | `audit_id,user_id,event_time,field_name,old_value,new_value` | Historical changes of `email`, `email_hash`, `phone` |
-| `dataset/system_activity.csv` | 4,011 | `activity_id,event_time,event_type,source_system,target_system,resource_id,reported_result,details` | Global operational stream — **claims** |
+| `dataset/user_audit_log.csv` | 306 | `audit_id,user_id,event_time,field_name,old_value,new_value` | Historical identity changes |
+| `dataset/system_activity.csv` | 4,011 | `activity_id,event_time,event_type,source_system,target_system,resource_id,reported_result,details` | Global operational stream. Every row is a **claim**. |
 | `dataset/deletion_rules.csv` | 15 | `rule_id,data_category,condition,required_action` | Policy |
-| `dataset/evidence_files.csv` | 94 | `file_id,file_path,origin,captured_at` | Evidence manifest (no case membership) |
+| `dataset/evidence_files.csv` | 94 | `file_id,file_path,origin,captured_at` | Evidence manifest |
 | `dataset/evidence/**` | 94 files | 24 `.sql`, 26 `.log`, 28 `.json`, 1 `.txt`, 4 `.pdf`, 11 `.png` | Evidence |
 | `dataset/output.csv` | 0 | header only | Template |
 
-`reported_status` ∈ {`COMPLETE`, `PARTIALLY_COMPLETE`, `NOT_STARTED`} and is a claim [REQ]. `audit_at` is the cutoff: "Use only information available at or before `audit_at`" [REQ: AGENTS §6.2].
+`reported_status` ∈ {`COMPLETE`, `PARTIALLY_COMPLETE`, `NOT_STARTED`}. It is "a claim from the existing deletion workflow, not proof of the true state" [REQ: problem_statement "Input"]. `audit_at` is the cutoff: "Use only information available at or before `audit_at`" [REQ: AGENTS §6.2].
 
-### A.2 Output [REQ: `problem_statement.md` "Required Output", AGENTS §6.3]
+#### A.1.2 Reference answers never reach production logic [REQ: AGENTS §4.3, §6.7 — no hardcoded labels or shortcuts] (fixes A1.1)
 
-- File `output.csv` at the **repository root**, header exactly `case_id,deletion_status,steps_json`, 518 data rows, one per `case_id`, sorted by `case_id`.
+- Only `code/evaluation/` may open `dataset/sample_output.csv`. Production code under `code/audit/` and `code/main.py` must not reference that path, the string `sample_output`, or any value copied from it.
+- The production pipeline treats `sample_deletion_requests.csv` exactly like `deletion_requests.csv`, i.e. as unlabeled input.
+- **Enforcement (test):** `test_no_reference_leak` scans every production source file and fails if:
+  - `sample_output` appears in it, or
+  - a `case_\d+` literal appears in it, or
+  - an `evidence_\d+` / `activity_\d+` / `audit_\d+` literal appears in it, or
+  - a concrete resource-ID literal matching `\b[a-z_]+_\d+\b` appears outside an allow-list of format examples in docstrings.
+
+  A second test runs the pipeline with `sample_output.csv` made unreadable (path redirected in the test) and asserts identical output.
+
+#### A.1.3 The manifest does not establish case ownership [REQ: AGENTS §6.1, §6.6 — "The manifest does not identify which case or user a file concerns"] (fixes A1.2)
+
+- `evidence_files.csv` supplies only `file_id → path, origin, captured_at`.
+- File names and `origin` values are **not** evidence of content or ownership [FACT: `connector_configurations_20260812.json` contains account-profile lookups].
+- Case scope is established only through:
+  - evidence-based identity linking (Section C.5), and
+  - cutoff admissibility rules (Section C.7).
+
+#### A.1.4 Input validation before processing (fixes A1.3)
+
+Row counts alone are insufficient. The loader (M1) must pass **all** checks below before any case is processed. Any failure aborts the run with file, row and column in the message.
+
+| Check | Applies to | Rule |
+|---|---|---|
+| Header | every CSV | Exact column list and order as in A.1.1 |
+| Encoding | every CSV | UTF-8 decodes; no NUL bytes |
+| Timestamp format | all `*_at`, `event_time`, `updated_at`, `captured_at` | Strict `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`, parsed to aware UTC. [FACT: 0 violations in current data] |
+| Request time order | request files | `requested_at ≤ reported_at ≤ audit_at` [FACT: 0 violations] |
+| Unique keys | `case_id` (per file), `user_id`, `user_identities.email` (case-insensitive), `audit_id`, `activity_id`, `rule_id`, `file_id`, `file_path` | No duplicates [FACT: all unique] |
+| Case-ID set | `deletion_requests.csv` | 518 IDs; format `case_\d+` |
+| Enums | `reported_status` | {COMPLETE, PARTIALLY_COMPLETE, NOT_STARTED} |
+| | `field_name` | {email, email_hash, phone} |
+| | `reported_result` | {SUCCESS, FAILED, PARTIAL} |
+| | `required_action` | {DELETE, REDACT, ANONYMIZE, RETAIN} [FACT: observed sets] |
+| | `event_type` | Known set; unknown values are logged and treated as uninterpreted claims |
+| Identifier formats | identities, audit log | `email_hash` is 64 lowercase hex. `sha256(lower(email)) == email_hash` for every identity row [FACT: 850/850]; a mismatch is a warning, not an abort. |
+| Referential | audit log | Every `user_id` exists in `user_identities.csv` |
+| Manifest paths | `evidence_files.csv` | Path is relative, resolves inside `dataset/evidence/`, exists, and is a regular file. Every file on disk under `evidence/` is listed in the manifest. [FACT: both hold] |
+| Evidence capture header | `.sql` files | The in-file `Captured at` / `snapshot_completed_at` equals the manifest `captured_at`. A mismatch is a warning; the manifest value is used. [FACT: 24/24 match] |
+| Rules table | `deletion_rules.csv` | Every `data_category` maps to an entry in the canonical policy table (A.3.2); unknown categories abort |
+
+### A.2 Output contract [REQ: `problem_statement.md` "Required Output", AGENTS §6.3, README "Output"]
+
+- File `output.csv` at the **repository root**. Header exactly `case_id,deletion_status,steps_json`. 518 data rows, one per input `case_id`, no extras.
 - `deletion_status` ∈ {`COMPLETE`, `INCOMPLETE`, `NOT_APPLICABLE`}.
-- `steps_json`: valid JSON array; each object has **exactly** `step_no, phase, system_id, resource_id, operation, state, evidence_id`. Key order and whitespace are ignored; array order is significant.
-- `NOT_APPLICABLE` ⇒ `[]`.
-- `step_no` is consecutive from 1. Phase order is FINDING → REMEDIATION → VERIFICATION.
-- Within a phase: "follow the operation order in the table above, followed by `system_id` and `resource_id` in ascending order" [REQ: problem_statement "Rules"].
-- `COMPLETE`: only verification steps, each citing evidence proving the state at `audit_at`.
-- `INCOMPLETE`: findings (cite evidence) + full remediation + post-remediation verification. Remediation and verification steps carry `evidence_id = ""`.
-- An evidence reference may be a `file_id`, `activity_id`, or `audit_id` [REQ: README "Output"]. Never cite evidence captured after `audit_at` [REQ: AGENTS §6.6].
+- `steps_json` is a valid JSON array. Each element has **exactly** the keys `step_no, phase, system_id, resource_id, operation, state, evidence_id`. Key order and whitespace are ignored; array order is significant.
+- `NOT_APPLICABLE` ⇒ `[]` ("because no deletion or deletion verification is authorized").
+- `step_no` is consecutive from 1. Phase order is FINDING → REMEDIATION → VERIFICATION. Within a phase, steps follow the operation-table order, then `system_id`, then `resource_id`, ascending [REQ: problem_statement "Rules"; README "Output"].
+- `COMPLETE`: "include only verification steps proving the current state". Each step cites a `file_id`, `activity_id` or `audit_id`.
+- `INCOMPLETE`: findings (citing evidence), "the complete remediation plan", and the checks that must pass afterward. Remediation and those checks use `evidence_id = ""`.
+- Never cite organizer-only truth or evidence captured after the case's `audit_at` [REQ: AGENTS §6.6].
 
-### A.3 Allowed enums [REQ: problem_statement "Allowed Operations"] — table order defines sort order
+#### A.2.1 Row sort order — single implemented interpretation (fixes A2.2)
+
+Repository sources say only "sorted by `case_id`" [REQ: AGENTS §6.3, problem_statement "Required Output", README "Output" and checklist]. None of them says whether that means numeric or lexicographic order.
+
+Verified facts:
+
+- [FACT] `deletion_requests.csv` is listed in **numeric** ascending order and is **not** lexicographically sorted (`case_99` precedes `case_100`).
+- [FACT] `sample_output.csv` uses zero-padded IDs (`case_01`–`case_32`), so it is consistent with both interpretations and does not settle the question.
+- The grader parses `steps_json` per row. Whether it matches rows by `case_id` or by position is **not stated** in the repository, so the evaluator's expectation cannot be confirmed from repo files.
+
+**Decision:** implement exactly one order. Rows are written in **ascending numeric order of the integer suffix of `case_id`**, which is identical to the order of `deletion_requests.csv`. The validator enforces only this order.
+
+- Rationale: it is the only order the challenge itself uses for the evaluation inputs, and it is a stable, documented key.
+- **Open confirmation (Q-SORT, A.8):** ask the organizers/user whether lexicographic order is expected. If the answer differs, the single sort key is changed in `config.py`. The two orders are never both supported.
+
+### A.3 Canonical operation and treatment tables — single source of truth (fixes A3.1, A3.2, A3.3)
+
+#### A.3.1 `OPERATIONS` [REQ: problem_statement "Allowed Operations", AGENTS §6.4]
+
+The table below is implemented once, in `code/audit/config.py` as `OPERATIONS`. The step builder (M8), the serializer/validator (M9) and the tests all import it; no module may restate these values. Row order **is** the sort order.
 
 | idx | Phase | Operation | State |
 |---|---|---|---|
@@ -67,35 +137,252 @@ Labels used throughout:
 
 "Do not invent additional phases, operations, or states" [REQ: AGENTS §6.4].
 
-### A.4 Decision requirements [REQ: AGENTS §6.5, problem_statement]
+#### A.3.2 `TREATMENTS` — category → policy → finding → remediation → verification
+
+Also defined once in `config.py`. It relates each `deletion_rules.csv` category to the only valid operation chain. The step builder generates from it; the validator checks every chain against it. A step whose enum values are valid but whose chain does not match its resource's category is an error. Valid enums alone do not imply correct remediation (A3.2).
+
+| Category (rule) | Required action | Violating state → finding | Remediation | Final verification | Dependency class |
+|---|---|---|---|---|---|
+| USER_PROFILE (01), SECONDARY_IDENTIFIER (02), SEARCH_INDEX_ENTRY (03), CACHE_ENTRY (04), SUPPORT_ATTACHMENT (06), USER_EXPORT (09), MARKETING_PROFILE (10) | DELETE | PRESENT → REPORT_REMAINING_RECORD | DELETE_RECORD | VERIFY_RECORD_ABSENT | record change |
+| SUPPORT_MESSAGE (05), EMAIL_DELIVERY_LOG (11), ACCOUNT_TOMBSTONE (15) | REDACT | exposed identifiers → REPORT_EXPOSED_PII | REDACT_RECORD | VERIFY_RECORD_REDACTED | record change |
+| ANALYTICS_PROFILE (07), PRODUCT_TELEMETRY (08) | ANONYMIZE | attributable → REPORT_EXPOSED_PII | ANONYMIZE_RECORD | VERIFY_RECORD_ANONYMIZED | record change |
+| SECURITY_AUDIT_LOG (12), LEGAL_HOLD_RECORD (13) | RETAIN | — (A.4.3) | — | VERIFY_RECORD_PRESENT | none |
+| BACKUP_ARCHIVE (14) | RETAIN, restore blocked | restorable → REPORT_RESTORE_RISK | BLOCK_RESTORE | VERIFY_RESTORE_BLOCKED | recreation path |
+| DATA_FLOW (no rule row) [FACT: treatment taken from the operation table and samples] | disable | enabled → REPORT_ACTIVE_DATA_FLOW | DISABLE_DATA_FLOW | VERIFY_DATA_FLOW_DISABLED | recreation path |
+
+Required tests, which derive their expectations from `TREATMENTS` and not from enum lists:
+
+- every category produces exactly its chain;
+- a mismatched chain (e.g. ANALYTICS_PROFILE with DELETE_RECORD) is rejected unless the resource is classified into a DELETE category with a recorded basis;
+- every rule row in `deletion_rules.csv` has exactly one `TREATMENTS` entry.
+
+#### A.3.3 Output order vs remediation dependencies (fixes A3.3)
+
+These are two separate concepts and are validated separately.
+
+- **Output order** is fixed by the explicit sort rule in A.2 (operation index, `system_id`, `resource_id`). It is never altered to express a dependency.
+- **Dependency rules** [REQ: AGENTS §6.5]:
+  - D1: disable data flows and block unsafe restores before changing dependent records.
+  - D2: process downstream copies before their source records when the dependency requires it.
+
+**D1 against the output order.** Every recreation-path remediation (idx 4–5) sorts before every record change (idx 6–8), so D1 is satisfied by construction. The validator still checks it explicitly: no record-change step may precede a recreation-path step for the same case.
+
+**D2 against the output order.** The output order sorts by `system_id`/`resource_id` within an operation, so it can disagree with a downstream→source dependency. [FACT] In every sample, the copy and its source share one `resource_id` (e.g. a replica copy of `account_005`), so no sample exhibits D2.
+
+- [UNRESOLVED Q-DEP] If a run detects a D2 dependency whose resources would sort source-first, the conflict is **not** resolved by reordering. The output follows the explicit sort rule, because it is the more specific instruction and is stated in both problem_statement "Rules" and README "Output".
+- The conflict is recorded in the explain trace and counted in the evaluation report, and the user is asked to confirm before final generation.
+
+### A.4 Decision requirements and correctness contracts
+
+#### A.4.1 Explicit decision requirements [REQ: AGENTS §6.5, problem_statement]
 
 - Determine intent first. Access, correction, export, marketing opt-out and other non-deletion requests are `NOT_APPLICABLE`.
 - Resolve current and historical identifiers. The request email may be either.
-- Reconstruct state at `audit_at`. Never accept `reported_status` / `reported_result` as proof.
-- `COMPLETE` only if:
+- Reconstruct state at `audit_at`. `reported_status` / `reported_result` are not proof.
+- A deletion is complete only when:
   - every relevant copy has the required treatment;
-  - required retained records remain;
-  - retained records keep only permitted identifiers;
-  - no active sync/import/restore path can recreate data.
-- `ACCOUNT_TOMBSTONE`: keep the stable reference; remove name, email, phone, email hash.
-- Remediation: disable flows and block restores before changing dependent records; process downstream copies before sources when a dependency requires it.
+  - every required retained record remains available;
+  - retained records contain only permitted identifiers;
+  - no active sync, import or restore path can recreate prohibited data.
+- `ACCOUNT_TOMBSTONE`: keep the stable subject reference; remove name, email, phone, email hash and any other direct identifier required by the REDACT rule.
+- Report every relevant violation and recreation risk supported by participant-visible evidence.
 
-### A.5 Process, logging, packaging, evaluation requirements
+#### A.4.2 Per-resource evaluation states (fixes A4.2)
+
+Internally, each in-scope resource ends with exactly one of three verdicts:
+
+| Verdict | Meaning | Basis |
+|---|---|---|
+| `COMPLIANT_PROVEN` | The required final state holds at `audit_at` | An admissible observation (A.4.4) that shows the compliant state |
+| `VIOLATION_PROVEN` | The required final state does not hold | An admissible observation that shows the violating state |
+| `UNKNOWN` | Not determinable | No admissible observation, only claims, or a non-qualifying snapshot |
+
+**"Not found" vs "not observed".** ABSENT may be concluded only from:
+
+- (a) **explicit negative evidence that names the resource**: `rows=0`, `http_status=404`, `status_code: 404`, `result=NOT_FOUND`, or an equivalent field on an observation whose `resource_id` is that resource; or
+- (b) a **qualifying scope-aware snapshot** (Section C.8):
+  - it declares coverage of the resource's system and collection;
+  - it covers every copy table it contains;
+  - it is admissible;
+  - the resource is missing from it;
+  - no later admissible positive observation exists.
+
+An unnamed query miss, a missing mention in an unrelated file, a SUCCESS activity, or a `reported_status` of COMPLETE yields `UNKNOWN`, never ABSENT.
+
+#### A.4.3 Retained records (fixes A4.3)
+
+Retained records are SECURITY_AUDIT_LOG (rule_12), LEGAL_HOLD_RECORD (rule_13) and the archive itself in BACKUP_ARCHIVE (rule_14). For each such in-scope resource:
+
+1. **Does the condition apply?** Evaluate the rule condition from admissible evidence.
+   - rule_12: `retention_until > audit_at`.
+   - rule_13: `retained_until > audit_at` and no evidence that the hold was released.
+   - rule_14: the archive exists; restore access is a separate check.
+   - Outcome is `TRUE`, `FALSE` or `UNKNOWN` (field not observed).
+2. **Is presence established?** Only by an admissible positive observation (e.g. `rows=1`, `FOUND`, a row present). Otherwise presence is `UNKNOWN`, or `ABSENT` if the A.4.2 rules apply.
+3. **Effect on the decision:**
+
+| Condition | Presence | Verdict | Output effect |
+|---|---|---|---|
+| TRUE | PRESENT | COMPLIANT_PROVEN | VERIFY_RECORD_PRESENT (cited in COMPLETE; `""` in INCOMPLETE) |
+| TRUE | ABSENT | VIOLATION_PROVEN, but **no finding operation exists** for a missing retained record | No invented step. The case cannot be COMPLETE (A.4.5). The violation is recorded in the explain trace and reported (Q-RETAIN). |
+| TRUE | UNKNOWN | UNKNOWN | Blocks COMPLETE (A.4.5). In INCOMPLETE, a future VERIFY_RECORD_PRESENT check is still listed. |
+| FALSE | any | Not a retained record under that rule; no applicable rule row | No step; logged (Q-RETAIN) |
+| UNKNOWN | any | UNKNOWN | Blocks COMPLETE |
+
+**Never invent an output operation** to represent a missing-record violation [REQ: AGENTS §6.4].
+
+#### A.4.4 Admissibility (summary; details in C.7)
+
+An observation proves state at `audit_at` only if **both** its file `captured_at ≤ audit_at` **and** its own observation time `≤ audit_at`. Capture time and event time are stored separately and are never substituted for each other. [FACT] evidence_13 and evidence_36 each contain a record dated after the file's own capture time.
+
+Activities and `reported_status` are claims. They never prove state.
+
+#### A.4.5 Completeness gate (fixes A2.1, A4.1)
+
+- **Required resource set** `REQ(case)`: every resource established in scope by a grounded or catalog link (C.5) that has a required final state in `TREATMENTS`.
+  - The primary account is always a member.
+  - Candidates that are only ambiguously linked (C.6) are **not** members. They are recorded as unresolved scope, and never as proof of completeness.
+
+```text
+gate(case):
+  V = {r: verdict(r) for r in REQ(case)}
+  if any(v == VIOLATION_PROVEN with an expressible finding for v in V):  return INCOMPLETE
+  if all(v == COMPLIANT_PROVEN and has_citable_proof(r) for r, v in V): return COMPLETE
+  return UNDETERMINED          # internal only; never silently mapped to COMPLETE
+```
+
+- **UNKNOWN never counts as compliance.** A required resource whose state is unknown is never silently omitted from a COMPLETE answer.
+- **[UNRESOLVED Q-UNDETERMINED]** The output contract has no status for "not provable". INCOMPLETE requires findings that cite evidence, which cannot exist for an unknown state.
+- Until the user decides a policy, `UNDETERMINED` cases are:
+  - listed in the run summary and the evaluation report, with per-resource reasons;
+  - written to `output.csv` only after an explicit, documented decision on their mapping. The final-output readiness check (J) fails while any case is `UNDETERMINED` without such a decision.
+- On the public samples, the gate must not change any COMPLETE answer. [FACT] Every expected COMPLETE verification step has citable proof. This is an acceptance test for the gate.
+
+### A.5 Output validation semantics (fixes A2.3, A2.4)
+
+The validator (M9) runs four layers. Layers L3 and L4 need the pipeline's internal case results (scope, observations, links); the validator receives them alongside `output.csv`.
+
+**L1 Structural**
+
+- header and row set;
+- JSON parses to a list;
+- exact 7 keys per step;
+- types (`step_no` int, others str);
+- enum values from `OPERATIONS`;
+- `phase` and `state` consistent with `operation`.
+
+**L2 Contract**
+
+- sort order (A.2.1, A.3.1);
+- consecutive `step_no`;
+- `NOT_APPLICABLE` ⇔ `[]`;
+- COMPLETE ⇒ VERIFICATION steps only, each with non-empty `evidence_id`;
+- INCOMPLETE ⇒ ≥1 FINDING; every FINDING cites evidence; every REMEDIATION/VERIFICATION has `""`.
+
+**L3 Citation meaning** (A2.3). For every non-empty `evidence_id`:
+
+1. The ID exists (`file_id` in the manifest, or a known `activity_id` / `audit_id`).
+2. Its time (file `captured_at`, or `event_time` for activities) is ≤ the case's `audit_at`.
+3. The cited file contains an observation of **this** `resource_id` that is admissible for state, **or** it is the qualifying omission snapshot for the resource (A.4.2b).
+4. That observation **supports the step's state**:
+   - findings: PRESENT / exposed identifiers / enabled / restorable;
+   - verifications: the compliant state matching the operation.
+5. The resource is linked to the case subject by a recorded grounded or catalog link.
+6. Activities and audit-log rows are not accepted as proof of state; citing them for a state claim is an error.
+
+**L4 Remediation completeness and dependencies** (A2.4)
+
+- For every `VIOLATION_PROVEN` resource with an expressible finding: exactly one finding with the operation from `TREATMENTS`, and the remediation from `TREATMENTS`.
+- No remediation without a finding.
+- Verification covers:
+  - every remediated resource, with the chained final check;
+  - every in-scope retained record (VERIFY_RECORD_PRESENT);
+  - the primary account (VERIFY_RECORD_ABSENT);
+  - every other member of `REQ(case)`.
+- Dependency rule D1 holds. D2 conflicts are reported (A.3.3).
+- Every in-scope recreation path (enabled flow, restorable backup) has a finding. A case with an active recreation path can never be COMPLETE.
+
+### A.6 Evaluation-metric contract (fixes A5.4)
+
+- `evaluation_report.md` and `usage_report.md` are **generated** from:
+  - the evaluator's output (`code/evaluation/main.py`), and
+  - the run's usage counters.
+- Each report records the command, timestamp, git commit and input files used.
+- Numbers are never typed by hand.
+- A metric that cannot be computed (e.g. hidden-test accuracy, or LLM tokens when no LLM call was made) is written as **"not available"** with the reason.
+- Cost figures state the price source and its date, and are labelled as estimates.
+- No hidden-test score is claimed. Public-sample metrics are labelled as public-sample metrics.
+
+### A.7 Process, logging, packaging and privacy requirements
 
 | Requirement | Source |
 |---|---|
-| Append-only `log.txt` beside `AGENTS.md`. Entry per turn with `tool=` and `model=`. No secrets or PII. | AGENTS §2, §5 |
-| Use only `dataset/` participant files. No organizer files, hardcoded labels, or case-family shortcuts. | AGENTS §4, §6.7 |
-| Runnable from terminal, deterministic, secrets from env vars only, README with setup/run. | AGENTS §6.7 |
-| `code.zip`: code, prompts, config, README, evaluation reports. No dataset, venvs, caches, nested archives, secrets. | AGENTS §6.9, README "Packaging" |
-| `evaluation_report.md`: case-level status accuracy, step- and field-level accuracy, sequence accuracy, ≥3 custom cases, failures and improvements. | AGENTS §6.8, problem_statement |
-| `usage_report.md`: providers/models, call counts, input/output tokens, total and average per request, total and per-request cost, per-model and overall totals. | AGENTS §6.8 |
-| Agent trace ZIP (`agent-trace.zip`) of session files. | `agent_trace_instructions.md` |
-| Code judge ignores `.csv/.json/.sql/.log`. Keep metrics and prompts in `.md` or source. | README "Evaluation" |
+| Append-only `log.txt` beside `AGENTS.md`; one entry per turn with populated `tool=` and `model=`; no secrets or personal data | AGENTS §2, §5 |
+| Only participant-facing `dataset/` files; no organizer files, hardcoded labels or case-family shortcuts | AGENTS §4, §6.7 |
+| Runnable from terminal; deterministic; secrets only from environment variables | AGENTS §6.7 |
+| `evaluation_report.md` content (case, step, field, sequence accuracy; ≥3 custom cases; failures and improvements) and `usage_report.md` content (providers/models, calls, tokens, averages, costs, per-model and overall totals) | AGENTS §6.8, problem_statement |
+| `code.zip` contents: code, prompts, config, README, reports. Exclusions: no dataset, venvs, caches, nested archives, secrets or real personal data | AGENTS §6.9, README "Packaging" |
+| Agent trace ZIP, reviewed and redacted | `agent_trace_instructions.md` |
+| Code judge ignores `.csv/.tsv/.json/.jsonl/.sql/.log`; metrics, custom cases and prompts must live in `.md` or source files | README "Evaluation" |
 
-**[UNRESOLVED] Report location conflict.** AGENTS §6.8 says `evaluation/…` inside `code.zip`; README says `code/evaluation/…`, and its zip command (`README.md`, `code`) only bundles `code/`. **[PROPOSAL]** Place reports in `code/evaluation/` (README is more specific and matches its packaging command), so they appear in the zip as `code/evaluation/*.md`.
+#### A.7.1 Report location — decided (fixes A5.1)
 
-**[UNRESOLVED] README ownership.** The root `README.md` is the challenge README and the submission needs our setup/run README. **[PROPOSAL]** Before packaging, add a clearly marked "Solution: setup and run" section at the top of the root README (subject to user approval) instead of discarding challenge text.
+- AGENTS §6.8 and problem_statement say the zip must include `evaluation/evaluation_report.md` and `evaluation/usage_report.md`.
+- README (line 99, marked **Important**) requires `code/evaluation/evaluation_report.md` and `code/evaluation/usage_report.md`, "matching `code/evaluation/main.py` in this starter layout".
+- README packaging notes explicitly accept this layout: "Keep your evaluation reports in `code/evaluation/` so they are bundled automatically with `code`". The README checklist also lists `code/evaluation/…`.
+
+**Decision:** reports live in `code/evaluation/`. The README is the most specific instruction and matches the starter layout and its packaging command.
+
+Before packaging, the zip listing is checked to contain `code/evaluation/evaluation_report.md` and `code/evaluation/usage_report.md`. A top-level duplicate is **not** created; two copies could diverge.
+
+#### A.7.2 README handling (fixes A5.2)
+
+- The original challenge text in `README.md` is preserved verbatim.
+- The solution's setup and run instructions are added as **one clearly delimited section** with the heading "Solution — Setup and Run" and begin/end markers. It contains:
+  - prerequisites;
+  - environment variables (names only);
+  - the exact run, evaluate and test commands;
+  - the output location;
+  - the flag settings used.
+- The addition is made only after the user confirms where it goes (top or bottom of the root README) **[pending Q-README]**. No other edits are made to challenge text.
+
+#### A.7.3 Privacy rules for logs, traces and archives (fixes A5.3)
+
+| Artifact | May contain | Must not contain | Check before submission |
+|---|---|---|---|
+| `log.txt` (submitted) | User prompts verbatim (secrets → `[REDACTED]`); summaries; file paths in repo; `case_id`, `user_id`, `resource_id`, `file_id` | Dataset emails, phones, names, hashes; API keys/tokens; credentials | Regex scan for email, phone, 64-hex, `sk-`/key patterns; manual review of hits |
+| Run explain trace (`run_explain.jsonl`) | Full identifiers needed for debugging | — | **Never packaged or logged**; kept in scratch, deleted after use |
+| `evaluation_report.md` / `usage_report.md` | IDs and metrics | Dataset personal values; secrets; sensitive configuration values | Same regex scan |
+| `code.zip` | Code, prompts, `.md` reports, README | `dataset/`, explain traces, caches, `.env`, nested archives, personal values | Unzip listing reviewed; regex scan of all text files |
+| `agent-trace.zip` | Session JSONL / `/export` files for this challenge | Credentials, auth/config files, unrelated sessions | Staged copy scanned. Session files contain dataset identifiers and the user's account details: redaction, or explicit user approval to include them, is required before upload. The listing is reviewed. |
+
+All dataset persons are fictional [REQ: AGENTS §7], but personal-data handling applies as if they were real (organisation policy, DPDP Act 2023).
+
+### A.8 Decisions and open questions recorded in this section
+
+| ID | Topic | Status |
+|---|---|---|
+| Q-SORT | Row order | **Decided:** numeric suffix order (A.2.1); organizer confirmation requested |
+| Q-REPORTS | Report location | **Decided:** `code/evaluation/` (A.7.1) |
+| Q-README | Position of the README addition | Open: user confirmation |
+| Q-UNDETERMINED | Output mapping for cases that fail the completeness gate without a proven violation | Open: user decision before final generation (A.4.5) |
+| Q-RETAIN | Missing retained record or false retention condition: no output operation exists | Open: recorded, no invented step (A.4.3) |
+| Q-DEP | Downstream→source dependency that conflicts with the sort order | Open: none observed; output follows the sort rule; conflict reported (A.3.3) |
+| Q-LATE-LINK | Using late-captured files with earlier inner timestamps for identity linking only | Open: see C.7 / I.R3 |
+
+### A.9 Required alignment of Sections B–J (not yet edited)
+
+Section A now overrides the following statements in later sections. They must be updated before implementation of the affected module:
+
+- **F.2** "If a COMPLETE-case resource has no citable proof, it is omitted from the steps and logged" conflicts with A.4.5. Replace with the completeness gate.
+- **E** pseudocode, COMPLETE branch: apply `gate()`. Use the verdicts from A.4.2 and the retained-record table in A.4.3.
+- **F.3** "[UNRESOLVED] sorted by `case_id`": replace with the A.2.1 decision.
+- **F.4** validator: replace with layers L1–L4 (A.5).
+- **B.2/B.5**: `config.py` holds `OPERATIONS` and `TREATMENTS` as the single source (A.3). M9 consumes internal case results for L3/L4.
+- **D.3** "Retained record missing" and the security-audit/legal-hold bullets: align with A.4.3.
+- **G.3** anti-leakage rules: align with the A.1.2 tests.
+- **I**: update R14 (Q-RETAIN), R17 (decided), R18 (decided). Add Q-UNDETERMINED and Q-DEP.
+- **J**: add the gate check (no undecided `UNDETERMINED` cases), the L3/L4 validator pass, and the privacy scans from A.7.3.
 
 ---
 
