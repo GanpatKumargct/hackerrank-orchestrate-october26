@@ -147,6 +147,87 @@ SYSTEM_ALIASES = {                         # Q-SYSTEM-ALIASES (A.8.1) [ASSUMPTIO
 }
 
 # --------------------------------------------------------------------------- #
+# Category signals (D.1.1). T2 = specific collection / event semantics,
+# T3 = generic container. T1 is an explicit record_type field. Prefixes and
+# workflow operations are never grounded signals.
+# --------------------------------------------------------------------------- #
+COLLECTION_CATEGORY_T2 = {
+    "customer_profiles": "USER_PROFILE", "profile_lookups": "USER_PROFILE",
+    "customer_search_documents": "SEARCH_INDEX_ENTRY", "index_queries": "SEARCH_INDEX_ENTRY",
+    "customer_analytics_reports": "ANALYTICS_PROFILE", "customer_analytics_profiles": "ANALYTICS_PROFILE",
+    "profiles": "ANALYTICS_PROFILE",
+    "support_conversations": "SUPPORT_MESSAGE", "ticket_attachments": "SUPPORT_ATTACHMENT",
+    "customer_exports": "USER_EXPORT", "customer_export_jobs": "USER_EXPORT", "exports": "USER_EXPORT",
+    "connector_configurations": "DATA_FLOW", "connector_subscriptions": "DATA_FLOW", "connectors": "DATA_FLOW",
+    "backup_catalog": "BACKUP_ARCHIVE", "backup_restore_entries": "BACKUP_ARCHIVE",
+    "restore_entries": "BACKUP_ARCHIVE",
+    "security_audit_events": "SECURITY_AUDIT_LOG", "security_audit_records": "SECURITY_AUDIT_LOG",
+    "audit_records": "SECURITY_AUDIT_LOG",
+    "retained_order_records": "LEGAL_HOLD_RECORD",
+    "deleted_customer_references": "ACCOUNT_TOMBSTONE",
+}
+COLLECTION_CATEGORY_T3 = {"support_records": "SUPPORT_MESSAGE", "tickets": "SUPPORT_MESSAGE"}
+EVENT_CATEGORY_T2 = {
+    "profile_lookup_completed": "USER_PROFILE",
+    "index_query_completed": "SEARCH_INDEX_ENTRY",
+    "analytics_profile_read_completed": "ANALYTICS_PROFILE", "analytics_profile_read": "ANALYTICS_PROFILE",
+    "analytics_identity_scan": "ANALYTICS_PROFILE",
+    "audit_record_read_completed": "SECURITY_AUDIT_LOG",
+    "connector_config_read_completed": "DATA_FLOW", "connector_heartbeat": "DATA_FLOW",
+    "connector_config_loaded": "DATA_FLOW",
+    "restore_policy_read_completed": "BACKUP_ARCHIVE", "restore_candidate_evaluated": "BACKUP_ARCHIVE",
+    "restore_authorization_completed": "BACKUP_ARCHIVE",
+    "support_ticket_read_completed": "SUPPORT_MESSAGE", "message_pii_scan": "SUPPORT_MESSAGE",
+    "message_read": "SUPPORT_MESSAGE", "attachment_pii_scan": "SUPPORT_ATTACHMENT",
+    "export_download_check_completed": "USER_EXPORT", "export_metadata_read_completed": "USER_EXPORT",
+    "retained_order_loaded": "LEGAL_HOLD_RECORD",
+    # Q-D-ASSUMPTIONS (a) [ASSUMPTION]: identifier-keyed contact lookups / legacy contact index
+    "contact_lookup_completed": "SECONDARY_IDENTIFIER", "contact_query_completed": "SECONDARY_IDENTIFIER",
+    "deletion_marker_check": "SECONDARY_IDENTIFIER",
+}
+# Copy scope for existence (C.8.2). "resource": copies in which THIS resource was
+# observed, plus primary (Stage 7 proposal, pending approval). "collection": any copy
+# seen for the collection (original C.8.2 wording).
+COPY_SCOPE = "resource"
+# Free-text content features in documents (D.3.1): customer-uploaded file properties.
+DOCUMENT_ATTACHMENT_MARKERS = ("uploader customer",)
+WORKFLOW_OP_CATEGORY_ACTION = {"DELETE_RECORD": "DELETE", "REDACT_RECORD": "REDACT",
+                               "ANONYMIZE_RECORD": "ANONYMIZE", "DISABLE_DATA_FLOW": "DISABLE",
+                               "BLOCK_RESTORE": "RETAIN_BLOCK_RESTORE"}
+
+# Collections that hold each category (used for omission coverage, C.8).
+CATEGORY_COLLECTIONS = {
+    "USER_PROFILE": ("customer_profiles",),
+    "SEARCH_INDEX_ENTRY": ("customer_search_documents",),
+    "ANALYTICS_PROFILE": ("customer_analytics_profiles", "customer_analytics_reports"),
+    "SUPPORT_MESSAGE": ("support_records", "support_conversations"),
+    "SUPPORT_ATTACHMENT": ("ticket_attachments", "support_records"),
+    "USER_EXPORT": ("customer_exports", "customer_export_jobs"),
+    "DATA_FLOW": ("connector_subscriptions", "connector_configurations"),
+    "BACKUP_ARCHIVE": ("backup_restore_entries", "backup_catalog"),
+    "SECURITY_AUDIT_LOG": ("security_audit_records", "security_audit_events"),
+    "LEGAL_HOLD_RECORD": ("retained_order_records",),
+    "ACCOUNT_TOMBSTONE": ("deleted_customer_references",),
+}
+
+# PII slots per category (D.3.3, D.3.1, D.3.8). Each slot lists accepted field names.
+PII_SLOTS = {
+    "ANALYTICS_PROFILE": {"reference": ("user_id", "customer_reference"), "email": ("email",),
+                          "phone": ("phone",), "hash": ("email_hash",)},
+    "PRODUCT_TELEMETRY": {"reference": ("user_id", "customer_reference"), "email": ("email",),
+                          "phone": ("phone",), "hash": ("email_hash",)},
+    "SUPPORT_MESSAGE": {"requester_email": ("requester_email",), "requester_phone": ("requester_phone",),
+                        "requester_name": ("requester_name",)},
+    "ACCOUNT_TOMBSTONE": {"name": ("name",), "email": ("email",), "phone": ("phone",),
+                          "hash": ("email_hash",)},
+    "EMAIL_DELIVERY_LOG": {"email": ("email", "recipient", "to")},
+}
+TOMBSTONE_REFERENCE_FIELD = "subject_reference"
+# rule_05 shared-context indicators (Q-D-ASSUMPTIONS (b)) [ASSUMPTION]
+SHARED_CONTEXT_FIELDS = ("ticket_id",)
+SHARED_CONTEXT_WORDS = ("order", "delivery", "agent", "parcel", "shipment", "receipt", "ord-")
+
+# --------------------------------------------------------------------------- #
 # Media (B.1.3). Local, hash-pinned cache only; nothing is ever transmitted.
 # --------------------------------------------------------------------------- #
 MEDIA_CACHE_DIR = REPO_ROOT / "code" / "media_cache"

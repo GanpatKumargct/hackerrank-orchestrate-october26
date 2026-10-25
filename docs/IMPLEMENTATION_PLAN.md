@@ -377,6 +377,12 @@ This register is the single authoritative place for decisions. Other sections re
 | Q-RETENTION-EXPIRED | Expired security-audit retention → `UNKNOWN(POLICY_GAP)` → held. No new treatment. A test is required even though the current data has no case (D.3.4). | user (Q8) | — |
 | Q-HOLD-EXPIRED | Expired or released legal hold → `POLICY_GAP` → held, unless participant-visible policy clearly establishes the treatment. No new operation (D.3.5). | user (Q9) | — |
 | Q-DEP | The output sort contract takes precedence over downstream→source ordering. The order is unchanged; `DEPENDENCY_ORDER_CONFLICT` is reported and tested. Non-conflicting dependencies (D1) are still enforced. | user (Q10) | A.3.3, D.4.2, F.1.4 |
+| Q-TRACE-KEY-LINK | **Keep enabled** under the strict C.5.2 conditions (trace request key attributes to the subject, the state line names the resource, no conflicting own identifier). Do not broaden. | user (Stage 7 instruction) | `config.TRACE_KEY_LINKS = True` |
+| Q-COPY-SCOPE | **Keep `resource` mode** (`config.COPY_SCOPE = "resource"`): absence is checked in the copies where this resource was observed, plus primary. The `collection` mode is not forced unless an approved policy explicitly requires collection-wide coverage. [FACT] `collection` adds 33 `PROOF_NOT_SINGLE_OBSERVATION`; violations are identical. | user (Stage 7 review) | Tested: `test_copy_scope_single_observation_rule` |
+| Q-SUBJECT-SCOPED-COVERAGE | **Approved.** A record missing from a bundle snapshot or inventory extract is absence evidence only when that file establishes coverage for the same subject. Direct SQL table dumps stay full-table coverage. Reason: the broader reading gives false ABSENT and false COMPLIANT (evidence_51 / case_24 `account_5334`). | user (Stage 7 review) | Regression test kept: `test_omission_direct_table_and_subject_scoped_bundle` |
+| Q-IDENTIFYING-FIELDS | **Not added.** `subject_selector` and `matched_value` are not Stage 6 link fields. First prove which entity each field identifies and what the relationship means. Until then the scope rules stay unchanged; `matched_value` remains exposure evidence only for resources already in scope. | user (Stage 7 review) | Locked by `test_selector_and_scan_fields_are_not_link_fields` |
+| Q-RESTORE-AUTH-SIGNAL | **`decision=deny` alone is insufficient.** A deny decision does not show that the restore is actually blocked. It counts as proof only when the evidence independently establishes the restore operation, the relevant target and an effective denial/block state. Until then it gives no restore reading. | user (Stage 7 review) | Locked by `test_restore_deny_alone_is_not_blocked` |
+| Q-SHARED-CONTEXT-WORDS | **Keep `config.SHARED_CONTEXT_WORDS` conservative.** Phrases such as "account access" are not added without evidence review. An UNKNOWN (e.g. case_27 `support_4707`) is safer than an unsupported redaction decision. A phrase can be added only after its meaning is validated against existing evidence, together with targeted tests. | user (Stage 7 review) | Locked by `test_unlisted_phrase_keeps_shared_context_unknown` |
 | Q-D-ASSUMPTIONS | **Provisionally approved, still labelled [ASSUMPTION], each tested:** (a) legacy contact index → SECONDARY_IDENTIFIER / DELETE; (b) rule_05 shared-context indicators; (c) rule_14 restore-block condition TRUE unless admissible evidence shows blocking is impossible; (d) handover "no direct identifier" counts as CLEARED slots **only when that evidence actually states it for that record**, and a missing field is never proof; (e) connector → target-system map; (f) `VERIFY_RECORD_PRESENT` for a required legal-hold record when its condition and presence are proven | user (Q11) | Never presented as challenge requirements or verified facts |
 | Q-SYSTEM-ALIASES | `profile_service → account_service` and `support_replica → support_platform` | user (Q12) | Centralised in `config.SYSTEM_ALIASES`; applied only below explicit owner fields (F.1.3); tested |
 | Q-OWNER-RESOLUTION | Owner (`system_id`) resolution order: (1) explicit, valid owner field; (2) evidence-backed alias; (3) `reporter_service` that **exactly** equals a recognized canonical system ID. Never from prefixes, partial matches, similar names or timing. Absent, conflicting or ambiguous → `SYSTEM_AMBIGUOUS`. | user (Stage 4 instruction) | Scoped to owner resolution only; `reporter_service` is never an identity link. Canonical IDs = `config.CANONICAL_SYSTEMS` (F.1.3). Tested. |
@@ -400,7 +406,6 @@ Only items that cannot be decided inside the plan remain here.
 |---|---|---|
 | X-SORT-CONFIRM | Organizer confirmation of the numeric `case_id` order | Nothing in implementation; noted at submission |
 | X-MEDIA-TRANSMISSION | (1) Report the vision-capable OpenAI models actually available to the account; (2) obtain explicit approval to transmit the 11 screenshots | Stage 12 (media cache); until then PNG facts are `EVIDENCE_GAP` |
-| Q-TRACE-KEY-LINK | Confirmation requested. The Stage 6 instruction says trace/query keys are not identity proof, while the approved C.5.2 allows a conditional STRONG `TRACE_KEY` link: the trace request key attributes to the subject, the state line names the resource, and no conflicting own identifier is present. Stage 6 implements C.5.2 behind `config.TRACE_KEY_LINKS` (currently on). 281 included resources depend only on it. | Stage 7 interpretation of those 281 resources; switching the flag off is a one-line change and is covered by a test |
 | X-HELD-MAPPING | After the first complete analysis run, the user reviews the held list and either authorizes reason-specific mappings or extra evidence work, or accepts that no compliant `output.csv` exists | Stage 13 (final output) |
 
 #### A.8.3 Blocking conflict: held cases vs the 518-row contract
@@ -1145,7 +1150,7 @@ Exclusion is never applied from a single conflicting hit without these rules.
 - [FACT, Stage 6 run on 550 inputs]
   - Included resources: `GROUNDED_DIRECT` 1,187; `GROUNDED_TRACE` 282; `CATALOG` 10; `CONTAINS_SUBJECT_PII` 2; `GROUNDED_FK` 1.
   - Excluded: `EARLIER_EPISODE` 4 (case_33 `export_1260`; case_07 `object_19`; case_17 `account_6523`, `tombstone_17`); `WEAK_LINK_ONLY` 1; `AMBIGUOUS_WORKFLOW` 2,715 resource-case pairs. 436 of the 437 workflow-claimed resources have more than one claimant.
-  - **281 included resources rest only on `TRACE_KEY` links**, see Q-TRACE-KEY-LINK in A.8.2.
+  - **281 included resources rest only on `TRACE_KEY` links**, see Q-TRACE-KEY-LINK in A.8.1 (decided: keep enabled).
   - **195 included resources have only late-captured (link-only) links**, so their state cannot be proven at the cutoff. Sample examples: case_09 `account_3960` and `audit_record_4902`; case_23/24/29/30 audit records; case_26 `account_5684`.
   - 12 cases have no in-scope resource: case_01, 02, 04 and the non-deletion inputs case_534–542. Intent is not applied until Stage 8.
 
@@ -1736,6 +1741,59 @@ Claims may create edges because edges affect only ordering validation, never sco
 ### D.6 Alignment status
 
 Aligned with A.8.1 on 2026-10-25 (A.9). The decisions now applied here are Q-SPLIT-PROOF (D.3.3 rule 1), Q-RETAIN (D.3.9), Q-RETENTION-EXPIRED (D.3.4), Q-HOLD-EXPIRED (D.3.5), Q-DEP (D.4.2) and Q-D-ASSUMPTIONS (D.2.3, D.3.1, D.3.3 rule 4). New reason codes are registered in A.8.4.
+
+### D.7 Stage 7 implementation notes (`code/audit/policy.py`, `code/audit/state.py`)
+
+- **Reading only admissible evidence.** Only observations `admissible_for_state` at the case cutoff are read. Activity rows (`DELETE_RECORD SUCCESS`, `BLOCK_RESTORE`, `CHECK_*`, `RESTORE_BACKUP`, `LINK_RESOURCE_IDENTITY`) are attached as claims and never read as state. HTTP codes, `rows`, `result` labels and flags are interpreted only inside an admissible observation that names the resource.
+- **Existence readings and E.3.1 quality.**
+
+  | Quality | Readings |
+  |---|---|
+  | Q2 | `rows`, `http_status`/`status_code` 200/404, `result` FOUND/hit/IDENTIFIABLE/… vs NOT_FOUND/miss |
+  | Q3 | Hit counts; event lines that name the resource without a completed read (scans, heartbeats, checks) |
+  | Q1 | Record content (rows, bundle records, completed reads, documents) |
+
+  Latest per copy wins. A same-time disagreement is resolved by quality when one side is the stronger tier (`RESOLVED_BY_QUALITY`); otherwise it is `CONFLICTING_OBSERVATIONS`.
+- **Copies and omission.**
+  - Any copy present → PRESENT.
+  - All copies absent and proven by one source → ABSENT.
+  - Otherwise `PROOF_NOT_SINGLE_OBSERVATION`.
+  - Copy scope follows `config.COPY_SCOPE` (Q-COPY-SCOPE).
+  - Omission uses C.8.2 coverage-first selection. Bundle and inventory units are subject-scoped (Q-SUBJECT-SCOPED-COVERAGE).
+- **Classification.** D.1 tiers are T1 `record_type`, T2 collection/event/document markers, T3 `support_records`/`tickets`. A T-WF claim is only a constrained tie-breaker. Prefixes are recorded as signals and never decide.
+  - Contact lookups and legacy contact index entries map to SECONDARY_IDENTIFIER (Q-D-ASSUMPTIONS a).
+  - PDF observations carry `document_text` (whole document) for category markers only. It is not an identifier field.
+- **Conditions.**
+
+  | Rules | Treatment of the condition |
+  |---|---|
+  | rule_05 | Shared-context indicators (ticket id, approved context words, another subject in the record); else UNKNOWN |
+  | rule_06 | Owner fields (`uploaded_by`, `owner_email`, `requester_email`, handover `subject`, `subject_reference`) |
+  | rule_15 | `account_status` |
+  | rule_14 | TRUE by assumption (c) |
+  | rules 07/08/11 | Violation predicates, evaluated as PII exposure |
+  | rules 12/13 | Need presence **and** the retention date in the same observation (Q3 strict, Q4) |
+  | FALSE (rules 05/06/15) | `POLICY_GAP` |
+
+- **PII.** A single observation must show all required slots CLEARED (Q4). Exposure comes from:
+  - a slot populated with a subject identifier;
+  - free text mentioning the subject;
+  - a PII scan `matched_value` attributed to the subject;
+  - a handover `IDENTIFIABLE` row whose identifier column is the subject's.
+
+  Handover `ANONYMIZED | no direct identifier` counts as cleared (Q-D-ASSUMPTIONS d). A bare label is `LABEL_ONLY`.
+- **Tombstone.** All four prohibited slots cleared plus `subject_reference` populated. A cleared reference gives `RETAINED_RECORD_MISSING` (unexpressible).
+- **Backups and flows.** Readings follow D.3.6/D.2.2. Contradictory signals in one observation → `CONFLICTING_OBSERVATIONS`. A proven-absent archive gives `RETAINED_RECORD_MISSING`.
+- [FACT, Stage 7 run: 1,482 in-scope resource assessments over 550 inputs, copy scope `resource`]
+  - Verdicts: `COMPLIANT_PROVEN` 324, `VIOLATION_PROVEN` 637, `UNKNOWN` 521.
+  - UNKNOWN reasons:
+    - `CONDITION_UNKNOWN` 306: security audit retention unobserved 214, support shared context 87, attachment owner 4, legal hold 1;
+    - `POST_CUTOFF_ONLY` 191;
+    - `LABEL_ONLY` 11;
+    - `FIELD_COVERAGE_INCOMPLETE` 6;
+    - `NO_ADMISSIBLE_OBSERVATION` 6;
+    - `CATEGORY_UNGROUNDED` 1.
+  - `RETAINED_RECORD_MISSING`: 0. In-scope resources with an ambiguous owner: 7.
 
 ---
 
@@ -2607,7 +2665,7 @@ Each stage is small enough to inspect and test on its own. A stage starts only w
 | 4 | Stdlib PDF extractor (B.1.2) with page-level provenance; local media-cache reader with SHA/prompt/schema verification (B.1.3, no external calls); `ObservationIndex`; owner resolution (F.1.3, Q-OWNER-RESOLUTION) | 3 | 4 PDFs OK. 11 PNGs reported as `EVIDENCE_GAP` until an authorized cache exists. Index lookups deterministic, with no merging of observations. Owner-resolution tests pass. |
 | 5 | M3 identity + associations (C.4, C.4.1): timelines, `as_of` cutoff, attribution, catalog-claim parsing, record-level conflicts | 1, 4 | 518/518 and 32/32 resolution reported as data metrics; reuse/ambiguity, cutoff, unverified-hash, catalog-status and conflict fixtures pass |
 | 6 | M5 links, scope rules I1–I5/E1–E3, admissibility (C.7), workflow candidates (C.6), episode (`prior_request`) — see C.5.4 | 4, 5 | C.7 ten-row table tests; every included/excluded resource has a reason code; trace-key flag on/off, late-link, cutoff, anomaly, catalog, shared/ownership-changed, episode and workflow fixtures pass |
-| 7 | M4 classification (D.1), conditions (D.2), dimensions and verdicts (B.4, D.3, single-observation proof), omission (C.8), conflicts (E.3.1) | 6 | Unit tests for D.1–D.3, C.8 and E.3.1; Q-D-ASSUMPTIONS edge tests |
+| 7 | M4 classification (D.1), conditions (D.2), dimensions and verdicts (B.4, D.3, single-observation proof), omission (C.8), conflicts (E.3.1) — see D.7 | 6 | Unit tests for D.1–D.3, C.8 and E.3.1; Q-D-ASSUMPTIONS edge tests; copy-scope and subject-scoped coverage tests |
 | 8 | Intent (E.1), sets and gate (E.4–E.5) | 7 | G.1.1 gate tests D-1…D-13; E.1.3 intent tests |
 | 9 | Steps, citations, system resolution (F.1–F.2), serializer, validator L1–L4, all-or-nothing writer, held report (F.3–F.4) | 8 | F/G.1 tests; integration I-1…I-5 |
 | 10 | Evaluator and metrics (G.3), custom cases CC1–CC5 (G.5), edge cases (G.4) | 9 | Metrics computed from an actual run; false-COMPLETE = 0; invalid citations = 0 |

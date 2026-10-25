@@ -282,7 +282,8 @@ def parse_pdf(manifest_row):
     obs = []
     for no, text, heading in pages:
         for rid in sorted(set(RESOURCE_ID_RE.findall(text))):
-            fields = {"visible_text": text, "page": no, "page_heading": heading[:120]}
+            # document_text: whole-document context for category features only (not an identifier field)
+            fields = {"visible_text": text, "page": no, "page_heading": heading[:120], "document_text": full}
             for label, vals in event_times.items():
                 fields[f"event_time.{label}"] = vals
             obs.append(make_observation(

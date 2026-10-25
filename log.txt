@@ -1415,3 +1415,127 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T02:06:23Z] Stage 7: resource state interpretation and policy evaluation
+
+User Prompt (verbatim, secrets redacted):
+Proceed with **Stage 7 only: Resource State Interpretation and Policy Evaluation**.
+
+### Objective
+For every in-scope resource produced by Stage 6, determine what the admissible evidence establishes about its state at the request's `audit_at` cutoff, and identify the applicable approved policy and required treatment. Do not produce final case-level deletion decisions.
+
+### Implementation requirements
+
+1. **Evidence-based state interpretation**
+   - Interpret resource states using the existing evidence normalizer, admissibility rules, identity resolution, and scope implementation.
+   - Treat reported statuses, activity results, HTTP codes, and success messages as claims—not automatic proof.
+   - Preserve source provenance and distinguish `captured_at`, `observed_at`, and internal event timestamps.
+   - Evidence from files captured after the cutoff must not prove the resource's state at the cutoff. Use admissible historical evidence only where the approved plan permits it.
+   - If evidence is missing, conflicting, or insufficient, return `UNKNOWN` with a specific reason. Never guess.
+
+2. **Single-observation proof**
+   - Preserve the approved rule that a COMPLETE-state claim must be independently supported by a single admissible observation.
+   - Do not combine multiple weak observations into stronger proof.
+   - Use the approved `PROOF_NOT_SINGLE_OBSERVATION` reason where applicable.
+
+3. **Policy evaluation**
+   - Apply only the approved rules in `deletion_rules.csv` and the implementation plan.
+   - Identify the required treatment for each resource, such as delete, redact, anonymize, retain, or block restore, where supported by the applicable rule.
+   - Respect legal holds and retention requirements. Never invent a missing retention period or treatment rule.
+   - Evaluate shared-context redaction, tombstone requirements, backup restore risks, and active data flows only where supported by approved rules and admissible evidence.
+   - Keep unknown policies and unsupported mappings unresolved with explicit reason codes.
+
+4. **Uncertainty and special cases**
+   - Late-file-only evidence must not establish state at the audit cutoff.
+   - Keep the 11 PNG evidence gaps explicit.
+   - Keep `audit_record_003` and `support_001` owner ambiguity unresolved unless new admissible evidence supports a resolution.
+   - Do not infer ownership or identity from prefixes, manifest `origin`, `reporter_service`, timing alone, or query keys.
+   - Keep `TRACE_KEY_LINKS` enabled under the approved strict conditions; do not broaden its use.
+   - Do not force account resources into scope merely to fill missing coverage.
+
+5. **Tests and validation**
+   - Add focused synthetic tests for state interpretation, contradictory observations, cutoff handling, single-observation proof, retention and legal holds, shared-context redaction, backups, active flows, unknown policy mappings, and missing evidence.
+   - Run the full test suite:
+     `python -m unittest discover -s code/tests -t code`
+   - Run:
+     `python code/main.py inspect`
+   - Report actual results, test counts, state/policy coverage, unknown reasons, and any regressions.
+
+### Strict boundaries
+
+- Do not implement Stage 8 or later.
+- Do not generate final deletion statuses, remediation-step sequences, predictions, or root `output.csv`.
+- Do not modify source dataset or evidence files.
+- Do not make API/network calls, transmit screenshots, or add dependencies.
+- Do not inspect, modify, move, or delete `ganpat-hackrank-hack/`.
+- Do not modify `.gitignore` without reporting the need first.
+- Follow the existing append-only `log.txt` requirements and update `docs/IMPLEMENTATION_PLAN.md` if implementation details require it.
+- Preserve existing decisions and avoid unrelated refactoring.
+
+**Stop after Stage 7 and report the files changed, tests and command results, state/policy coverage, unresolved evidence gaps, and any decisions requiring my approval. Wait for review before starting Stage 8.**
+
+Agent Response Summary:
+Surveyed observation shapes and state-field values per resource type, then implemented code/audit/policy.py (tiered D.1 classification with constrained workflow tie-break, prefix as recorded signal only; D.2.3 conditions incl. approved assumptions) and code/audit/state.py (admissible-only readings with E.3.1 quality/conflict handling, copy-aware existence, C.8.2 omission, single-observation proof for PII/retention/existence, retention same-observation rule, tombstone/backup/flow handling, claims attached never read). Prototype runs exposed two real issues, fixed conservatively: bundle/inventory snapshot omission is now subject-scoped (evidence_51 had falsely marked other subjects absent), and handover IDENTIFIABLE identifier columns are field evidence; also proposed COPY_SCOPE="resource" (flagged) and a PDF document_text field for category markers. Added 23 tests; failures during development were fixture timing mistakes (observations dated after file capture), fixed in tests; final full suite 157 tests OK. Real data: 1482 assessments, COMPLIANT 324 / VIOLATION 637 / UNKNOWN 521 (CONDITION_UNKNOWN 306, POST_CUTOFF_ONLY 191, LABEL_ONLY 11, FIELD_COVERAGE_INCOMPLETE 6, NO_ADMISSIBLE_OBSERVATION 6, CATEGORY_UNGROUNDED 1); 7 in-scope resources with ambiguous owner; 11 PNG gaps unchanged. Recorded Q-TRACE-KEY-LINK as decided and four new approval items in A.8.2 (Q-COPY-SCOPE, Q-SUBJECT-SCOPED-COVERAGE, Q-IDENTIFYING-FIELDS, Q-RESTORE-AUTH-SIGNAL); added D.7 and H Stage 7 row. No case decisions, no output.csv, no dataset change, no API calls, .gitignore untouched.
+
+Actions:
+* Created code/audit/policy.py, code/audit/state.py, code/tests/test_policy.py, code/tests/test_state.py
+* Edited code/audit/config.py (category signal maps, collections, PII slots, context indicators, COPY_SCOPE), code/audit/evidence/pdf_parser.py (document_text field), code/main.py (Stage 7 summary)
+* Edited docs/IMPLEMENTATION_PLAN.md (A.8.1 Q-TRACE-KEY-LINK decided, A.8.2 new items, D.7, H Stage 7)
+* Ran python -m unittest discover -s code/tests -t code (final 157 tests OK) and python code/main.py inspect
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
+## [2026-10-25T02:13:48Z] Stage 7 review decisions recorded (copy scope, coverage, fields, restore, words)
+
+User Prompt (verbatim, secrets redacted):
+Mere decisions on the 5 questions
+
+1. Q-COPY-SCOPE — Keep resource mode
+
+Abhi resource-specific copies plus primary resource ko check karo. collection mode se 33 extra resources UNKNOWN ho jaate hain, lekin violations same rehte hain. Jab tak approved policy explicitly collection-wide coverage require nahi karti, broader mode force mat karo.
+
+
+2. Q-SUBJECT-SCOPED-COVERAGE — Approve
+
+Bundle/inventory mein record ka absent hona sirf tab absence evidence ho jab file us particular subject ke liye coverage establish karti ho. Ye fix approve hai, kyunki broader interpretation false ABSENT aur false COMPLIANT verdicts de sakti hai. Iske liye regression tests preserve karo.
+
+
+3. Q-IDENTIFYING-FIELDS — Do not add them yet
+
+subject_selector aur matched_value ko automatically Stage 6 link fields mat banao. Pehle prove karo ki ye fields kis entity ko identify karte hain aur unka relationship semantics kya hai. Tab tak existing scope rules unchanged rakho.
+
+
+4. Q-RESTORE-AUTH-SIGNAL — Keep decision=deny insufficient by itself
+
+Denied decision ka matlab zaroori nahi ki restore actually blocked hai. Isko proof tabhi maana jaaye jab evidence restore operation, relevant target, aur effective denial/block state ko independently establish kare.
+
+
+5. Shared-context word list — Keep it conservative for now
+
+"account access" jaise phrases ko bina evidence review kiye automatically add mat karo. Case_27 ka UNKNOWN rehna, unsupported redaction decision lene se safer hai. Existing evidence se phrase ka meaning validate karo, phir targeted tests ke saath word list update karna.
+
+Agent Response Summary:
+Recorded all five Stage 7 review decisions as decided in docs/IMPLEMENTATION_PLAN.md A.8.1 and removed them from A.8.2: COPY_SCOPE stays "resource"; subject-scoped bundle/inventory coverage approved; subject_selector/matched_value not added as link fields; decision=deny alone gives no BLOCKED reading; shared-context word list unchanged. No production logic changed, since the code already matched these decisions; added three regression tests locking decisions 3-5 (decisions 1-2 were already covered by existing tests, which are preserved). Full suite: 160 tests OK. Stage 8 not started; no output.csv, no dataset change, no API calls.
+
+Actions:
+* Edited code/tests/test_state.py (new TestApprovedDecisions: 3 tests)
+* Edited docs/IMPLEMENTATION_PLAN.md (A.8.1 five decided rows, A.8.2 rows removed, stale A.8.2 reference fixed)
+* Ran python -m unittest discover -s code/tests -t code (160 tests OK)
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+

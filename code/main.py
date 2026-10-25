@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit import config                          # noqa: E402
 from audit.errors import ReportNote, SchemaError, ScopeCode  # noqa: E402
 from audit.scope import ScopeBuilder              # noqa: E402
+from audit.state import assess                    # noqa: E402
 from audit.evidence.extract import build_index    # noqa: E402
 from audit.identity import IdentityResolver, Subject  # noqa: E402
 from audit.loader import load_dataset             # noqa: E402
@@ -99,6 +100,39 @@ def cmd_inspect(args):
     print("episode-bounded cases (prior_request) and excluded resources:", episode)
     claim_sizes = Counter("unique" if len(v) == 1 else "shared" for v in builder._claimants.values())
     print("workflow-claimed resources (candidates only):", dict(claim_sizes))
+
+    # ---- resource state and policy (Stage 7): per in-scope resource; no case decisions ----
+    capture = {m["file_id"]: m["_captured_at"] for m in ds.manifest}
+    acts = {}
+    for a in ds.activities:
+        acts.setdefault(a["resource_id"], []).append(a)
+    verdicts, reasons, cats, by_cat, conds, owners_amb = Counter(), Counter(), Counter(), Counter(), Counter(), 0
+    unexpressible, scope_cache = 0, {}
+    for req in sorted(ds.all_requests(), key=lambda r: (r["_source"], config.ROW_SORT_KEY(r["case_id"]))):
+        sc = builder.build(req)
+        for rid in sorted(sc.included):
+            a = assess(rid, req["_audit_at"], sc.subject.user_id, index, resolver, acts.get(rid, []),
+                       capture, scope_cache)
+            verdicts[a.verdict] += 1
+            cats[a.category.value or f"UNKNOWN({a.category.reason.value})"] += 1
+            by_cat[(a.category.value or "-", a.verdict)] += 1
+            for r in a.reasons:
+                reasons[getattr(r, "value", r)] += 1
+            if a.condition is not None:
+                conds[(a.condition.rule, a.condition.value)] += 1
+            if a.owner.system_id is None:
+                owners_amb += 1
+            if a.verdict == "VIOLATION_PROVEN" and not a.expressible:
+                unexpressible += 1
+    print(f"resource assessments (in-scope, all 550 inputs): {sum(verdicts.values())}  copy scope: {config.COPY_SCOPE}")
+    print("verdicts:", dict(sorted(verdicts.items())))
+    print("categories:", dict(sorted(cats.items())))
+    print("verdict by category:", {f"{c}/{v}": n for (c, v), n in sorted(by_cat.items())})
+    print("unknown / special reasons:", dict(sorted(reasons.items())))
+    print("conditions (rule, value):", {f"{r}:{v}": n for (r, v), n in sorted(conds.items())})
+    print(f"violations with no output operation (RETAINED_RECORD_MISSING): {unexpressible}")
+    print(f"in-scope resources with ambiguous owner system: {owners_amb}")
+    print("evidence gaps admissible-by-capture are not readable:", [g[0] for g in index.gaps()])
     return 0
 
 
