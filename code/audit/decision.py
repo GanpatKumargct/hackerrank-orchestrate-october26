@@ -159,8 +159,9 @@ def build_steps(status, sets, assessments, index, audit_at, capture_map):
         if status == "COMPLETE":
             if a.verdict != COMPLIANT:
                 raise StepBuildError(H.VALIDATION_FAILED, f"{rid}: COMPLETE member not proven compliant")
-            if treat.action != "DELETE" and _proof_is_absence(a):
-                # the citation shows ABSENT, not the chain's final state (F.2.1 check 5)
+            # Q-ABSENT-NONDELETE-VERIFY: VERIFY_RECORD_ABSENT only for a DELETE end state proven by
+            # one absence observation; an absence proof never stands for another end state (F.2.1 check 5)
+            if (treat.verification == "VERIFY_RECORD_ABSENT") != _proof_is_absence(a):
                 raise StepBuildError(H.VALIDATION_FAILED, f"{rid}: {CITATION_STATE_MISMATCH}")
             steps.append(_step(treat.verification, system, rid, _cite(a, index, audit_at, capture_map)))
             continue

@@ -251,6 +251,33 @@ class TestApprovedDecisions(StateCase):
                  collection="tickets", system="support_platform")
         self.assertEqual(self.run_assess("support_90419", [msg]).reasons, (U.CONDITION_UNKNOWN,))
 
+    def test_absence_is_compliant_only_for_a_delete_end_state(self):  # Q-ABSENT-NONDELETE-VERIFY
+        gone = lambda rid, **kw: ob("evidence_n", "l1", rid, {"result": "NOT_FOUND", "ticket_id": "CS-7"}, **kw)
+        self.assertEqual(self.run_assess("search_90420", [gone("search_90420", record_type="SEARCH_INDEX_ENTRY",
+                                                                system="search_service")]).verdict,
+                         "COMPLIANT_PROVEN")
+        for rid, kw in (("support_90421", dict(collection="support_conversations", system="support_platform")),
+                        ("analytics_90422", dict(record_type="ANALYTICS_PROFILE", system="analytics_platform")),
+                        ("data_flow_90423", dict(collection="connector_subscriptions",
+                                                 system="integration_service"))):
+            a = self.run_assess(rid, [gone(rid, **kw)])
+            self.assertEqual((a.verdict, a.reasons), ("UNKNOWN", (U.POLICY_GAP,)), rid)
+        tomb = self.run_assess("tombstone_90424", [ob("evidence_n", "l1", "tombstone_90424",
+                                                      {"result": "NOT_FOUND", "account_status": "DELETED"},
+                                                      collection="deleted_customer_references",
+                                                      system="identity_service")])
+        self.assertEqual((tomb.verdict, tomb.reasons, tomb.expressible),
+                         ("VIOLATION_PROVEN", (HeldReason.RETAINED_RECORD_MISSING,), False))
+
+    def test_claims_and_failures_never_prove_absence(self):  # Q-ABSENT-NONDELETE-VERIFY
+        claims = [{"activity_id": f"activity_942{i}", "resource_id": "search_90425", "event_type": "DELETE_RECORD",
+                   "source_system": "deletion_worker", "reported_result": r, "_event_time": parse_ts(t)}
+                  for i, (r, t) in enumerate((("SUCCESS", "2026-05-02T00:00:00Z"),
+                                              ("FAILED", "2026-05-03T00:00:00Z")))]
+        a = self.run_assess("search_90425", [], activities=claims)
+        self.assertNotEqual(a.verdict, "COMPLIANT_PROVEN")
+        self.assertEqual(a.proof, ())
+
     def test_selector_and_scan_fields_are_not_link_fields(self):  # Q-IDENTIFYING-FIELDS
         self.assertFalse({"subject_selector", "matched_value"} & config.IDENTIFYING_FIELDS)
 

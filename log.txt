@@ -1587,3 +1587,46 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T02:32:06Z] Stage 8 review: absence verification rule and intent lexicon recorded
+
+User Prompt (verbatim, secrets redacted):
+Stage 8 reviewed. The full suite passes with 188 tests, and the sample comparison reports zero false-COMPLETE cases.
+
+Decision: Q-ABSENT-NONDELETE-VERIFY
+
+Approve VERIFY_RECORD_ABSENT as an allowed verification operation only when:
+
+A single admissible, resource-specific observation independently proves absence at the required audit cutoff.
+
+The absence satisfies the applicable policy's required end state.
+
+The evidence citation and resource mapping meet existing validation requirements.
+
+Do not treat absence as compliant when the applicable policy requires redaction, anonymization, retained-record presence, or another non-absence condition. Do not infer absence from workflow claims, failed operations, missing observations, or unsupported collection coverage. Preserve the existing single-observation proof rule.
+
+Record this decision in the decision register and add focused positive and negative regression tests. Make only the necessary changes.
+
+Intent lexicon
+
+Keep the current lexicon documented as a provisional assumption. Do not tune it against sample_output.csv or sample expected answers. Preserve conservative handling of genuinely uncertain intent.
+
+Agent Response Summary:
+Applied Q-ABSENT-NONDELETE-VERIFY with minimal changes: state.py no longer treats absence as compliant for REDACT/ANONYMIZE (now UNKNOWN POLICY_GAP; an absent ACCOUNT_TOMBSTONE becomes RETAINED_RECORD_MISSING per Q-RETAIN) or for DATA_FLOW (DISABLED treated as a non-absence end state, UNKNOWN POLICY_GAP); decision.py now refuses VERIFY_RECORD_ABSENT unless the proof is an absence reading and refuses any absence proof for another verification (CITATION_STATE_MISMATCH). Measured first: 0 resources in real data were compliant by absence under a non-DELETE policy, and the full inspect output is byte-identical to the Stage 8 run. Added 4 regression tests (2 positive/negative state tests, 2 decision tests) and updated one decision test whose expectation changed from VALIDATION_FAILED to POLICY_GAP hold; full suite 192 tests OK. Recorded Q-ABSENT-NONDELETE-VERIFY and Q-INTENT-LEXICON (provisional assumption, never tuned to samples) in A.8.1; A.8.2 now holds only X-SORT-CONFIRM, X-MEDIA-TRANSMISSION and X-HELD-MAPPING. Stage 9 not started; no output.csv.
+
+Actions:
+* Edited code/audit/state.py (absence handling for REDACT/ANONYMIZE/DISABLE/tombstone)
+* Edited code/audit/decision.py (VERIFY_RECORD_ABSENT citation guard)
+* Edited code/tests/test_state.py and code/tests/test_decision.py (regression tests)
+* Edited docs/IMPLEMENTATION_PLAN.md (A.8.1 two decided rows, A.8.2 row removed, E.9 notes)
+* Ran python -m unittest discover -s code/tests -t code (192 tests OK) and python code/main.py inspect (exit 0, output identical to Stage 8 run)
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+

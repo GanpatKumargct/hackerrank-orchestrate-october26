@@ -406,7 +406,11 @@ def assess(resource_id, audit_at, subject_user, index, resolver, activities, cap
         _from_dimension(a, existence, violation="PRESENT", compliant="ABSENT")
     elif action in ("REDACT", "ANONYMIZE"):
         if existence.value == "ABSENT":
-            _set(a, COMPLIANT, existence.proof)
+            # Q-ABSENT-NONDELETE-VERIFY: absence is not the required end state here
+            if category == "ACCOUNT_TOMBSTONE":
+                _set(a, VIOLATION, existence.proof, (HeldReason.RETAINED_RECORD_MISSING,), expressible=False)
+            else:
+                a.reasons, a.notes = (U.POLICY_GAP,), (f"record absent; policy requires {action}",)
         else:
             pii = resolve_pii(obs, category, subject_user, resolver)
             a.dimensions["pii_exposure"] = pii
@@ -438,7 +442,8 @@ def assess(resource_id, audit_at, subject_user, index, resolver, activities, cap
         flow = resolve_flag([r for o in obs for r in flag_reading(o, category)])
         a.dimensions["flow"] = flow
         if flow.value == UNKNOWN and existence.value == "ABSENT":
-            _set(a, COMPLIANT, existence.proof)
+            # Q-ABSENT-NONDELETE-VERIFY: DISABLED is a non-absence end state
+            a.reasons, a.notes = (U.POLICY_GAP,), ("connector absent; policy requires DISABLED",)
         else:
             _from_dimension(a, flow, violation="ENABLED", compliant="DISABLED")
     else:

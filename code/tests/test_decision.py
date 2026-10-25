@@ -191,12 +191,33 @@ class TestStepRules(GateCase):
         self.assertEqual((kind, reason), (HOLD, H.SYSTEM_AMBIGUOUS))
 
     def test_absence_cannot_prove_a_redacted_state(self):
-        # a support message proven absent cannot be cited as VERIFY_RECORD_REDACTED (F.2.1 check 5)
+        # Q-ABSENT-NONDELETE-VERIFY: a support message proven absent is not compliant (policy requires REDACT)
         gone = ob("evidence_m", "l1", "support_91010", {"result": "NOT_FOUND", "ticket_id": "CS-9"},
                   collection="support_conversations", system="support_platform")
         (kind, reason, detail), _, _ = self.run_case([acct_gone(), gone])
-        self.assertEqual((kind, reason), (HOLD, H.VALIDATION_FAILED))
-        self.assertIn("CITATION_STATE_MISMATCH", detail[0])
+        self.assertEqual((kind, reason), (HOLD, H.REQUIRED_RESOURCE_UNRESOLVED))
+        self.assertIn(("support_91010", "POLICY_GAP"), detail)
+
+    def test_verify_absent_positive_single_resource_specific_negative(self):
+        (kind, status, _), _, steps = self.run_case([acct_gone(), search_gone()])
+        self.assertEqual((kind, status), (EMIT, "COMPLETE"))
+        self.assertEqual({(s["operation"], s["resource_id"], s["evidence_id"]) for s in steps},
+                         {("VERIFY_RECORD_ABSENT", "account_91001", "evidence_a"),
+                          ("VERIFY_RECORD_ABSENT", "search_91006", "evidence_s2")})
+
+    def test_absence_proof_never_cited_for_another_end_state(self):
+        # defence in depth: even a (wrongly) compliant non-DELETE assessment with an absence proof is refused
+        gone = ob("evidence_m", "l1", "support_91010", {"result": "NOT_FOUND", "ticket_id": "CS-9"},
+                  collection="support_conversations", system="support_platform")
+        idx = ObservationIndex([acct_gone(), gone], {})
+        cap = {"evidence_a": AUDIT.replace(hour=0), "evidence_m": AUDIT.replace(hour=0)}
+        a = {r: assess(r, AUDIT, USER, idx, self.resolver, [], cap, {}) for r in ("account_91001", "support_91010")}
+        a["support_91010"].verdict, a["support_91010"].proof = "COMPLIANT_PROVEN", (gone.obs_id,)
+        a["support_91010"].reasons = ()
+        sets = build_sets(a, {})
+        with self.assertRaises(StepBuildError) as e:
+            build_steps("COMPLETE", sets, a, idx, AUDIT, cap)
+        self.assertIn("CITATION_STATE_MISMATCH", e.exception.detail)
 
     def test_order_independent_of_input_order(self):
         obs = [flow_off(), search_present(), acct_present(), audit_retained()]
