@@ -2697,6 +2697,51 @@ The earlier G statements ("no finding ⇒ COMPLETE", "all emails resolve" as an 
 - Q-EPISODE: E-14 uses `prior_request`;
 - Q-D-ASSUMPTIONS: each assumption has its own edge test.
 
+### G.7 Stage 10 implementation notes (`code/evaluation/`)
+
+- **Command.** `python code/evaluation/main.py [--stage-run runs/<ts>] [--out-dir DIR]`.
+  - It is offline and deterministic, and makes no model calls.
+  - It writes `metrics.json` and `evaluation_metrics.md` to a **new** directory (default `runs/<UTC ts>_evaluation`).
+  - It refuses the repository root and the Stage 9 run directory as targets. It never writes root `output.csv`, and never writes inside a Stage 9 run directory.
+  - Exit 0 only when false-COMPLETE = 0, invalid citations = 0, every custom case passes, and the Stage 9 staged rows are reproduced with their artifacts unchanged.
+- **Modules.**
+  - `evaluation/metrics.py`: G.3.1 occurrence-based alignment on `K` and `K'`, and the G.3.2 metrics.
+  - `evaluation/custom_cases/builders.py`: fictional mini-datasets for CC1–CC5 plus CC2-n, with expectations derived from the G.5 rules.
+  - `evaluation/custom_cases/runner.py`: runs each case through the production pipeline and the L1–L4 checks.
+  - `sample_output.csv` is read only by the evaluator (A.1.2). Production imports nothing from `evaluation/`; the leakage test is unchanged.
+- **(C) Stage 9 run evaluation is read-only.**
+  - The staging file is re-validated from text (L1/L2), and missing rows are checked to equal the held set.
+  - The 518 evaluation requests are re-run in memory to confirm byte-identical staged rows.
+  - The L3/L4 invariants are re-checked.
+  - The SHA-256 of every Stage 9 artifact is compared before and after.
+  - `evaluation_report.md` and `usage_report.md` in `code/evaluation/` remain Stage 13 deliverables (A.6, A.7.1).
+- **G.4 edge-case coverage (tests).**
+
+  | Edge case | Test |
+  |---|---|
+  | E-1 | `test_identity.test_current_and_historical_emails`, `test_scope.test_historical_identifier_links` |
+  | E-2 | `test_identity.test_association_windows_and_provenance` |
+  | E-3 | `test_evaluation.test_e3_lookalike_emails_never_attribute` (new) |
+  | E-4, E-5, E-6 | `test_admissibility.test_rows`, `test_late_link_never_grants_state_or_citation`, `test_scope.test_late_file_links_only_with_note` |
+  | E-7 | `test_state.test_named_negative_absent_single_proof_claims_ignored` |
+  | E-8 | `test_state.test_replica_presence_beats_primary_absence` |
+  | E-9, E-10 | `test_state.test_retention_same_observation`, `test_decision.test_d2_*` |
+  | E-11 | `test_evaluation.test_e11_log_level_never_changes_restore_state` (new) |
+  | E-12 | `test_state.test_flows` — newer observation wins. The screenshot part is not testable while X-MEDIA-TRANSMISSION is open. |
+  | E-13 | `test_scope.test_unique_shared_and_grounded`, `test_decision.test_workflow_candidate_*` |
+  | E-14 | `test_scope.test_prior_request_boundary` |
+  | E-15 | `test_intent.TestNonDeletion` |
+  | E-16 | `test_decision.test_d7_*` |
+  | E-17 | `test_decision.test_d9_*` |
+
+- **Run facts [FACT, `runs/20261025T050029Z_evaluation`, commit 386f8a6].**
+  - Public samples: status accuracy 0.0938 (3/32); false-COMPLETE 0; COMPLETE invariant failures 0; invalid citations 0; held rate 0.9062.
+  - Steps: precision 1.0, recall 0.0518, F1 0.0985 (10 of 193 expected steps strictly matched). Field accuracy 1.0 on every aligned pair. Citation accuracy 1.0.
+  - Sequences: exact 0.0312; mean LCS 0.0781. Internal REQ-decided ratio 0.7922.
+  - Custom cases: CC1, CC2, CC2-n, CC3, CC4 and CC5 all pass.
+  - **CC4 deviation, reported and not tuned:** the plan expects clauses `MARKETING_ONLY` and `SCOPE_LIMIT`. The provisional lexicon (Q-INTENT-LEXICON) detects only `MARKETING_ONLY`; "I still want order receipts" is not typed. The status (NOT_APPLICABLE) is correct.
+  - Stage 9 run `20261025T024207Z`: 54 staged rows reproduced byte-for-byte in memory; 464 held; invalid citations 0; artifacts unchanged.
+
 ---
 
 ## H. Implementation roadmap
@@ -2718,7 +2763,7 @@ Each stage is small enough to inspect and test on its own. A stage starts only w
 | 7 | M4 classification (D.1), conditions (D.2), dimensions and verdicts (B.4, D.3, single-observation proof), omission (C.8), conflicts (E.3.1) — see D.7 | 6 | Unit tests for D.1–D.3, C.8 and E.3.1; Q-D-ASSUMPTIONS edge tests; copy-scope and subject-scoped coverage tests |
 | 8 | Intent (E.1), sets and gate (E.4–E.5), and — per the Stage 8 instruction — step construction, citations and system resolution (F.1–F.2) with a per-case schema check (F.4 L1.5–L1.8, L2); in memory only — see E.9 | 7 | G.1.1 gate tests D-1…D-13; E.1.3 intent tests; step order/numbering/citation and validator negative fixtures |
 | 9 | Serializer, run-level validator (L1 file checks, L3 citation meaning, L4 policy completeness incl. D.4 dependency edges), staged writer under `runs/` (no root output), held report (F.3–F.4) — see F.7 | 8 | F/G.1 tests; partial-staging, held-report, duplicate/missing-case, file-schema, dependency and non-zero-exit tests |
-| 10 | Evaluator and metrics (G.3), custom cases CC1–CC5 (G.5), edge cases (G.4) | 9 | Metrics computed from an actual run; false-COMPLETE = 0; invalid citations = 0 |
+| 10 | Evaluator and metrics (G.3), custom cases CC1–CC5 (G.5), edge cases (G.4) — see G.7 | 9 | Metrics computed from an actual run; false-COMPLETE = 0; invalid citations = 0 |
 | 11 | **First complete analysis run** on real data | 10 | Staging file and held report produced; **no root `output.csv`**. Held count, case IDs, reasons and evidence gaps reported to the user (Q1). |
 | 12 | Media extraction (B.1.3) | 11 + X-MEDIA-TRANSMISSION | Only after explicit approval and a confirmed model; cache hash-verified; affected cases re-run |
 | 13 | Final run | 11 (+12 if approved) + X-HELD-MAPPING | Held = 0, or an authorized mapping applied; validator clean; byte-identical rerun; `usage_report.md` and `evaluation_report.md` generated; README bottom section added (Q-README) |

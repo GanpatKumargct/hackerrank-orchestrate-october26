@@ -1717,3 +1717,197 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T02:55:22Z] Read-only held-case analysis report (pre-Stage 10)
+
+User Prompt (verbatim, secrets redacted):
+Before starting Stage 10, perform a read-only analysis of the Stage 9 held cases.
+
+### Objectives
+- Analyze all 464 held evaluation cases using the existing `held_report.md`, `held_cases.json`, `run_summary.json`, and current pipeline outputs.
+- Group cases by hold reason and underlying root cause, distinguishing symptoms from actual causes.
+- Identify which cases may be resolvable using evidence already available locally versus those requiring new evidence, an external decision, or an unresolved policy interpretation.
+- Identify overlaps between hold reasons so counts are not incorrectly added together.
+- Review the 11 PNG evidence gaps and the unresolved owner/category/retention cases without guessing.
+- Compare the 32 sample cases with their expected outputs, but do not tune logic simply to match samples.
+
+### Required output
+Create a read-only analysis report under `docs/` containing:
+1. Hold-reason counts and root-cause groups.
+2. Case IDs grouped by root cause, without exposing email addresses or phone numbers.
+3. Evidence already available that could legitimately resolve each group.
+4. Cases that cannot be resolved without new evidence or an explicit policy decision.
+5. Recommended next actions ranked by impact and safety.
+6. A clear separation between verified findings, hypotheses, and open decisions.
+
+### Strict boundaries
+- Do not modify production code, tests, the dataset, or evidence files.
+- Do not modify root `output.csv` or generate new predictions.
+- Do not relax identity, evidence, retention, or policy rules to reduce the held count.
+- Do not make API/network calls or transmit screenshots.
+- Do not inspect or modify `ganpat-hackrank-hack/`.
+- Do not start Stage 10 or any later implementation stage.
+- Follow the existing `log.txt` requirements.
+- Run no command that changes the current staged results; read-only inspection only.
+
+Stop after producing the analysis report. Report the exact file path and the verified findings, then wait for review.
+
+Agent Response Summary:
+Produced docs/HELD_CASE_ANALYSIS.md from in-memory re-runs of the existing pipeline (scratchpad scripts only) plus the Stage 9 run files; the in-memory held set matched held_cases.json exactly and the sha256 of all five run files was verified unchanged before and after. The two gate reasons are shown to be symptoms of ten member-level classes; four dominate: P primary-account slot (333 cases; shared-claim accounts with no identifier-bearing evidence, activity details carry no identifier, timing not discriminating), R audit retention never present in any observation (202), C post-cutoff-only (134 cases, late files at least 47.9 h after cutoff), S support shared context unevidenced (82). Overlaps are given as exact combinations and cumulative subsets; no held case is resolvable from local admissible evidence under current rules. Verified that each of the 12 catalog claims follows a matching media capture by 7 min 1 s (11 PNG + 1 PDF); only case_46 could be fully unblocked by media. Sample comparison records where reference answers are more permissive (unlinked accounts, retention-free audit citation in case_31, category-level REDACT for support), without tuning. Ranked next actions and new open decisions listed; no rules, code, tests, dataset or outputs changed; Stage 10 not started.
+
+Actions:
+* Ran read-only scratchpad analysis scripts (pipeline in memory; dataset/sample_output.csv read for comparison only)
+* Created docs/HELD_CASE_ANALYSIS.md
+* Verified runs/20261025T024207Z files unchanged (sha256), no root output.csv
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
+## [2026-10-25T03:04:56Z] Read-only evidence-recovery feasibility analysis (pre-Stage 10)
+
+User Prompt (verbatim, secrets redacted):
+Perform a **read-only Evidence-Recovery Feasibility Analysis** before Stage 10. Do not begin Stage 10 implementation.
+
+### Objective
+
+Review the 464 currently held evaluation cases and determine whether any blockers can legitimately be resolved using evidence already present in the repository, without weakening approved identity, scope, admissibility, cutoff, retention, or policy rules.
+
+Use `docs/HELD_CASE_ANALYSIS.md`, the current Stage 9 held reports, the implementation plan, and the existing local dataset/evidence through the already implemented pipeline.
+
+### Analyze each blocker class
+
+1. **P — Primary account out of scope**
+   - Check whether existing admissible evidence provides an independently grounded subject-to-account link that the current pipeline legitimately missed.
+   - Do not use timing alone, shared workflow claims, prefixes, `reporter_service`, or manifest `origin` as identity proof.
+   - Do not weaken `Q-WEAK-VERIFY`.
+
+2. **R — Missing audit retention dates**
+   - Check all existing locally available evidence and parser outputs for admissible retention information.
+   - Distinguish genuinely absent fields from information that exists but is not extracted or indexed.
+   - Do not infer retention dates from record presence or expected sample answers.
+
+3. **C — Post-cutoff-only evidence**
+   - Determine whether any existing evidence independently establishes the required resource state at or before `audit_at`.
+   - Preserve the distinction between file capture time and internal event time.
+   - Never use late-captured evidence as proof of state at the cutoff unless the approved plan explicitly permits that use.
+
+4. **S — Shared-context support messages**
+   - Review existing message content and extracted fields to identify evidence that may already establish shared context.
+   - Keep the approved rule that redaction requirements must be grounded in evidence and policy.
+   - Do not broaden the shared-context word list simply to reduce UNKNOWN counts.
+
+5. **PNG and ambiguous-resource gaps**
+   - Identify which cases each missing PNG could potentially affect, without assuming its contents.
+   - Keep external screenshot transmission unauthorized.
+   - Identify any locally available alternative evidence and retain ambiguous ownership where no admissible proof exists.
+
+6. **Other blockers**
+   - Analyze remaining blocker classes using the same evidence-first approach.
+   - Separate parser/indexing omissions from genuinely missing evidence, policy gaps, and external-decision dependencies.
+
+### Required report
+
+Create `docs/EVIDENCE_RECOVERY_ANALYSIS.md` containing:
+
+- A summary of the 464 held cases and overlapping blocker classes.
+- For each blocker class: verified evidence available, evidence missing, potential parser/indexing gaps, and whether a legitimate resolution is possible without changing approved rules.
+- Exact case IDs affected, without email addresses, phone numbers, names, or unnecessary personal data.
+- A clear distinction between **verified findings**, **hypotheses**, and **recommendations**.
+- Recommended next actions ranked by safety and likely impact.
+- Explicit confirmation of whether any held cases are demonstrably resolvable from existing evidence under current approved rules.
+- Any decision or external evidence still required.
+
+### Strict boundaries
+
+- Read-only analysis only: do not modify production code, tests, dataset files, evidence files, or existing staged run artifacts.
+- Do not generate predictions, final statuses, remediation steps, or root `output.csv`.
+- Do not change any approved decision or weaken existing safeguards.
+- Do not tune logic to match `sample_output.csv`.
+- Do not make network/API calls or transmit screenshots.
+- Do not inspect, modify, move, or delete `ganpat-hackrank-hack/`.
+- Do not modify `.gitignore`.
+- Follow the existing `log.txt` requirements and append the required entry.
+- Verify the SHA-256 hashes of the existing Stage 9 staged files before and after analysis, and confirm that they remain unchanged.
+- Run only read-only inspection commands; do not rerun the staging writer if it would create or alter run artifacts.
+
+Stop after writing the report. Return the exact report path, verified findings, any resolvable cases, and remaining evidence/decision gaps. Wait for review before making any implementation changes.
+
+Agent Response Summary:
+Built a raw corpus of all non-PNG evidence (lines, JSON record dicts, stdlib PDF pages) with email/phone masking and compared it against the existing index, scope builder, resolver and assessments run in memory from scratchpad scripts; the staging writer was not run. Raw and index agree on 2507 of 2508 (resource, file) pairs; P has no pre-cutoff admissible subject-to-account link (raw co-occurrence and resolver attribution both checked), R records carry no retention token in any own raw record and no retention schedule exists anywhere, C members appear only in late files, S records contain no shared-context markers (the 4 "delivery" hits are a service name). Three gaps found (G1 unindexed noise line touching no case; G2 evidence_55 "retain until" extracted as event_time.retain until but not read as retention, case_45 still blocked by P/category/owner; G3 misleading NO_ADMISSIBLE_OBSERVATION label for deny-only backup_3250) and none changes any outcome: 0 of 464 held cases are resolvable from existing evidence under current rules. Wrote docs/EVIDENCE_RECOVERY_ANALYSIS.md with per-class findings, PNG impact table (only case_46 could be unblocked by media alone), case IDs, ranked recommendations and remaining decisions; SHA-256 of all five Stage 9 files verified unchanged.
+
+Actions:
+* Recorded and re-verified SHA-256 of runs/20261025T024207Z/* (unchanged)
+* Ran read-only scratchpad analysis scripts (pipeline in memory; no staging run)
+* Created docs/EVIDENCE_RECOVERY_ANALYSIS.md
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
+## [2026-10-25T05:01:26Z] Stage 10: evaluator and metrics
+
+User Prompt (verbatim, secrets redacted):
+Proceed with **Stage 10: Evaluator and Metrics only**, after reviewing `docs/EVIDENCE_RECOVERY_ANALYSIS.md`, `docs/IMPLEMENTATION_PLAN.md`, and the existing project instructions.
+
+### Scope
+1. Implement the Stage 10 evaluator and metrics exactly as specified in the approved implementation plan.
+2. Evaluate the existing staged run and report emitted versus held cases, validation outcomes, and relevant metrics.
+3. Keep all 464 currently held cases held unless new admissible evidence or an explicitly approved rule change justifies a different result.
+4. Preserve all existing approved evidence, identity, cutoff, policy, and citation rules.
+5. Keep the evaluator deterministic and offline.
+
+### Strict boundaries
+- Do **not** resolve X-HELD-MAPPING or invent a policy for held cases.
+- Do **not** generate or modify root `output.csv`.
+- Do **not** rerun the staging writer or overwrite existing Stage 9 run artifacts.
+- Do **not** change the dataset, participant evidence, sample answers, or approved rules.
+- Do **not** access the network, make API/LLM calls, or transmit screenshots.
+- Do **not** inspect or modify `ganpat-hackrank-hack/`.
+- Do **not** modify `.gitignore`.
+- Do not fix G2 or G3 in this stage unless the approved Stage 10 plan explicitly requires it; if so, stop and report the conflict before making that change.
+
+### Before implementation
+Inspect the Stage 10 requirements and list the exact files you intend to change. Confirm that the work can be completed without violating the boundaries above. If any requirement conflicts with these boundaries, stop and ask for approval.
+
+### After implementation
+- Run the relevant tests and the full test suite.
+- Report test results, evaluator outputs, changed files, and any remaining limitations.
+- Verify that the existing Stage 9 run artifacts remain unchanged.
+- Append the required entry to `log.txt`; record tool/model metadata only when actually available.
+- Do not commit changes unless explicitly authorized.
+
+Stop after Stage 10 implementation, tests, and report. Do not proceed to Stage 11 or final output generation.
+
+(The user later sent: "continue")
+
+Agent Response Summary:
+Listed the intended files and confirmed no boundary conflict (evaluator reads sample_output.csv for evaluation only, writes to a new runs/<ts>_evaluation directory, Stage 13 still owns evaluation_report.md, G2/G3 not required). Implemented code/evaluation/main.py (samples metrics, custom cases, read-only Stage 9 run evaluation with in-memory reproduction and L1-L4 invariants, refusal to write into repo root or the Stage 9 directory), code/evaluation/metrics.py (G.3.1 alignment, G.3.2 metrics) and code/evaluation/custom_cases/ (CC1-CC5 plus CC2-n builders and runner); added code/tests/test_evaluation.py (10 tests incl. new edge cases E-3, E-11); full suite 213 tests OK. Evaluator run (exit 0, runs/20261025T050029Z_evaluation): samples status accuracy 0.0938, false-COMPLETE 0, invalid citations 0, held rate 0.9062, step precision 1.0 / recall 0.0518; all custom cases pass with the CC4 SCOPE_LIMIT clause deviation reported (lexicon not tuned); Stage 9 staged rows reproduced byte-for-byte, 464 held unchanged, artifacts SHA-256 unchanged. No output.csv, no rule change, no commit.
+
+Actions:
+* Created code/evaluation/metrics.py, code/evaluation/custom_cases/__init__.py, builders.py, runner.py, code/tests/test_evaluation.py; implemented code/evaluation/main.py (was empty)
+* Edited docs/IMPLEMENTATION_PLAN.md (G.7 Stage 10 notes, H row 10)
+* Ran python -m unittest discover -s code/tests -t code (213 tests OK); python code/evaluation/main.py (scratchpad trial, then runs/20261025T050029Z_evaluation; exit 0)
+* Verified SHA-256 of runs/20261025T024207Z/* before and after (unchanged)
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
