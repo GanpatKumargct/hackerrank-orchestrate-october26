@@ -1035,3 +1035,64 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T00:40:14Z] Revise IMPLEMENTATION_PLAN Section G (testing and evaluation)
+
+User Prompt (verbatim, secrets redacted):
+G.1
+
+Problem: The M7 decision test says “no finding ⇒ COMPLETE.” This is unsafe because a case may have no findings simply because required resources are unknown, unresolved, or missing evidence. Some tests also assume all 518 and 32 case emails will resolve, which may conflict with Section C's unresolved-identity handling.
+
+Fix: Replace “no finding ⇒ COMPLETE” with an explicit completeness check. COMPLETE must require every required resource to be accounted for and supported by admissible evidence. Add tests for unknown resources, unresolved identity, missing evidence, conflicting observations, and held cases. Validate identity-resolution expectations against the approved rules rather than assuming every email must resolve.
+
+G.2
+
+Problem: The full-run integration test requires 518 rows, a clean validator, and deterministic output, but it does not resolve how the pipeline should behave when cases are held under the decisions recorded in A.8.3.
+
+Fix: Test successful and held-case runs separately. A successful final run must produce exactly 518 valid rows and be byte-identical on rerun. If any case is held, follow the approved staging and non-zero-exit behavior; do not generate a misleading final output.csv or silently omit held cases.
+
+G.3
+
+Problem: The evaluation metrics compare statuses, steps, fields, sequence order, and citations, but they do not explicitly measure whether all required resources were considered or whether COMPLETE was incorrectly assigned despite missing proof. Aligning steps by only operation and resource ID may also be ambiguous if multiple steps share those values.
+
+Fix: Add explicit metrics or diagnostic counts for required-resource coverage, unresolved resources, unsupported COMPLETE decisions, and invalid citations. Define an unambiguous step-alignment method that handles duplicate operations or resources. Keep public-sample metrics separate from hidden-test claims, and ensure sample results never become production decision rules.
+
+G.3 Anti-leakage rules
+
+Problem: The plan proposes grepping production code for sample IDs and resource identifiers. Text searches alone may miss indirect leakage or flag harmless references. Selecting feature flags based on public-sample metrics can also encourage overfitting.
+
+Fix: Keep sample_output.csv inaccessible to production code and test that separation. Use the identifier grep as a supplementary safeguard, not the only leakage check. Require written reasoning for feature flags based on general rules and edge-case tests, not merely improved sample scores. Reject changes that improve one sample case by weakening identity, cutoff, or evidence requirements.
+
+G.4
+
+Problem: The edge-case list covers many useful scenarios, but several expected outcomes need to be tied explicitly to the approved rules. For example, “FAILED delete claim + 404 evidence → ABSENT” could be misinterpreted as allowing a 404 alone to prove absence. The late-file tests must also respect the decision that late-captured evidence can help with linking only, never state proof or citation.
+
+Fix: Define the evidence conditions for each expected result. For the FAILED-claim and 404 case, verify that the absence conclusion is supported by the applicable evidence and coverage rules. Add assertions that late-captured files cannot prove state or be cited, even if they can contribute to linking under C.7. Ensure every edge case checks both the decision and the evidence supporting it.
+
+G.5
+
+Problem: The five custom cases are described with expected outcomes, but some cases lack enough detail to guarantee those outcomes under the approved identity, scope, policy, and evidence rules. For example, CC2 expects COMPLETE without specifying how every required resource is accounted for, and CC5 expects REMAINING_RECORD without stating the applicable resource policy and evidence requirements.
+
+Fix: Specify the inputs, identity basis, required resources, cutoff, relevant observations, applicable policy, and expected evidence for each synthetic case. Require CC2 to prove every required resource's compliant final state before expecting COMPLETE. Ensure CC3 verifies that late-captured evidence cannot create a finding or citation. Keep CC1 and CC5 conditional on the approved identity and policy rules, and do not hard-code outcomes that contradict those rules.
+
+Cross-section checks
+
+Problem: Section G contains assumptions that conflict with other parts of the plan, especially the rule that no finding means COMPLETE, the requirement to resolve all case emails, and the full-run requirement to produce 518 rows despite the held-case policy.
+
+Fix: Identify these conflicts explicitly and refer to the relevant decisions in A.8. Do not resolve them by weakening evidence requirements or inventing statuses. Keep Section G focused on testing and evaluation, leave other sections unchanged, and record changes and remaining blockers in the existing change log. Do not modify code, datasets, or output.csv during this plan-only update.
+
+Agent Response Summary:
+Verified read-only that sample answers have unique step keys under both (operation, system_id, resource_id) and (resource_id, phase), and that no sample citation is captured after audit_at. Rewrote only Section G: per-module unit tests tied to cited rules; withdrew "no finding => COMPLETE" and added 13 gate tests (unknown, missing evidence, conflicts, unresolved identity, held, errors); identity counts moved from assertions to data metrics; integration tests split into successful (518 rows, byte-identical rerun) and held paths (no root output.csv, staging, held report, non-zero exit, stale-file protection); unambiguous occurrence-indexed step alignment; added false-COMPLETE, invalid-citation, required-resource coverage, unresolved and held-rate metrics; anti-leakage based on loader allow-list, import rules and absent-file test with grep as supplementary and a written change-control rule rejecting evidence-weakening changes; edge cases with explicit evidence conditions (E-7 404 conditions, E-5 late file link-only); five fully specified fictional custom cases CC1-CC5 (CC2 with negative variant, CC3 late-file hold). Change log for this turn: Section G replaced; remaining blockers outside G are H (no stages for gate/held-path/custom builders), I (superseded risks, missing Q-SPLIT-PROOF and Q-RETENTION-UNOBSERVED), J (518-row gate lacks held-path condition and safety gates), and pending alignment lists in A.5, A.4.5, B.3/B.4.3, C.6/C.7, D.6, E.8, F.6; open decisions Q-SPLIT-PROOF, Q-RETENTION-UNOBSERVED, Q-EPISODE, Q-SORT, D-assumptions, plus the A.8.3 held-case blocker.
+
+Actions:
+* Edited docs/IMPLEMENTATION_PLAN.md (Section G replaced; other sections byte-identical)
+* Ran read-only Python over sample_output.csv, sample_deletion_requests.csv and evidence_files.csv
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+

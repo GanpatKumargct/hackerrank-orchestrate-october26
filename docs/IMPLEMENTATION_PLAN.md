@@ -2337,75 +2337,258 @@ New held reasons and decisions introduced here:
 
 ## G. Testing and evaluation
 
-### G.1 Unit tests (`code/tests`, stdlib `unittest`) [PROPOSAL]
+Section G defines how the rules of Sections A–F are tested and how the pipeline is evaluated. It adds no decision rules. Every expected outcome below is derived from an approved rule, and the rule is cited. Where a rule is still open (A.8.2, F.6), the test is written against the **current conservative rule** and marked so. It changes only if that rule is formally changed.
 
-| Module | Tests |
-|---|---|
-| M1 loader | header mismatch raises; timestamp parse (Z); duplicate IDs; missing evidence path |
-| M2 parsers | one fixture per format (4 log formats, nested `record_json`, `hits.documents`, `snapshots[]`, pipe TXT); trace grouping; free-text email extraction; UPPERCASE email; anomaly flag for observed-after-capture |
-| M3 identity | current match; historical match; hash computed for historical email; phone normalisation; `user_43` ≠ `user_430` |
-| M4 policy | each rule row → action; precedence order; contact-lookup → DELETE category; support message vs attachment |
-| M5 scope | grounded/trace/fk/catalog links; other-subject exclusion; episode boundary; workflow `unique_only` ambiguity → none |
-| C.7 admissibility | `captured_at == audit_at` admissible; `+1s` not; late file with early inner time → link only; observed-after-capture record excluded at earlier cutoff |
-| M6 state | replica-present ⇒ PRESENT; omission requires scope; latest observation wins; FAILED claim + 404 ⇒ ABSENT |
-| M7 decision | no finding ⇒ COMPLETE; finding ⇒ INCOMPLETE; non-deletion ⇒ NOT_APPLICABLE; WORKFLOW link cannot create a finding |
-| M8 steps | sort order; dedupe; step numbering; citation choice (latest pre-cutoff) |
-| M9 serializer/validator | round-trip CSV with quotes; every validator rule has a failing fixture |
-| E.1 intent | all 17 deletion openers + 5 languages; all 10 negated/non-deletion forms; "marketing lists only" ≠ deletion |
+Test framework: standard-library `unittest` (B.1.1). All fixtures are synthetic and fictional:
+
+- emails use the reserved `example.org` domain;
+- user IDs are `user_9xxx`;
+- resource IDs are `<prefix>_9xxxx`.
+
+Fixtures never copy dataset rows.
+
+### G.1 Unit tests by module
+
+Each row lists the rule under test and its required failing or negative fixtures. A test passes only if **both** the decision and the supporting evidence refs match.
+
+| Module | Tests | Rule |
+|---|---|---|
+| M1 loader | Exact header mismatch aborts; strict timestamp regex (Z, seconds); duplicate keys; manifest path outside `dataset/evidence/`; file on disk missing from manifest; audit-log chain break; hash mismatch → warning `HASH_UNVERIFIED`; request time-order violation | A.1.4, B.5 M1 |
+| M2 parsers | One fixture per format: 4 log formats + pipe rows, nested `record_json`, `hits.documents[]`, bundle `snapshots[]` with an explicit empty `records`, inventory `snapshot_scope`, stdlib PDF (ASCII85+Flate, escaped literals), media cache hit, media cache SHA mismatch → `FAILED`; noise-only log lines do not make a file `PARTIAL`; unparseable SQL → `FAILED` | C.1, B.1.2–B.1.3, B.3.2 |
+| C.2 provenance | Raw timestamps byte-identical after normalisation; `observed_at=None` keeps `time_basis="file"`; trace keys stored as `TRACE_KEY`, not record fields; nested hits keep the parent query separately | C.2 |
+| C.3 normalisation | UPPERCASE email equals lowercase; phone canonical equality only (no trunk-prefix or suffix match; missing `+` → `PHONE_UNCANONICAL`); `user_43` ≠ `user_430`; names never match; free-text bounded match | C.3 |
+| M3 identity | Current-email subject; historical-email subject; identifier held by two users → `AmbiguousSubject`; unknown email → `UnresolvedSubject`; hit after `valid_to` accepted with `HISTORICAL_VALUE_AFTER_CHANGE`; hit with overlapping reuse windows → `AMBIGUOUS_IDENTIFIER` | C.4 |
+| C.5 links | One test per relationship type; `QUERY_KEY_ONLY` creates no link when the hit document's own email differs; the trace key is overridden by the line's own identifier field; FK to a resource STRONG-linked to another subject → no link; rules I1–I5 and E1–E3 each with one fixture, including shared (I3) and ownership-changed (I4); every exclusion carries its reason | C.5.2–C.5.3 |
+| C.6 workflow | A unique claimant becomes a `WORKFLOW_CANDIDATE`, **not** a link; a shared claimant is not assigned; a candidate never appears in any step (Q-WEAK-VERIFY = No); a candidate with an observed violation causes a hold | C.6, A.8.1 |
+| C.7 admissibility | All 10 rows of the C.7 table, for `admissible_for_state`, `admissible_for_citation` and `admissible_for_link` with the flag on and off. Plus an assertion that no `PROOF` ref in any conclusion lacks `"state"` admissibility. | C.7, A.8.1 Q-LATE-LINK |
+| C.8 omission | Collection-level beats system-level even if older; snapshot of collection X does not prove absence in collection Y; primary-only absence + replica presence → PRESENT; topology extract gives no omission; a later named negative replaces the omission proof; snapshot from a `PARTIAL` file is discarded | C.8 |
+| M4 classify | Tier precedence (T2 beats T3; T-WF never beats grounded); same-tier conflict with the same treatment → `TREATMENT_EQUIVALENT`; same-tier conflict with different treatment and an eligible T-WF → LOW-confidence tie-break; no T-WF → `CATEGORY_AMBIGUOUS`; prefix-only → `CATEGORY_UNGROUNDED`; T-WF tie-break refused when the resource is itself only a workflow candidate | D.1 |
+| D.2 conditions | For **each** rule row: TRUE, FALSE and UNKNOWN fixtures. FALSE → `POLICY_GAP`, not compliant. DATA_FLOW supplemental chain. Expired retention, expired hold. | D.2.3–D.2.4, D.3.4–D.3.5 |
+| D.3 category semantics | Analytics slot states (`POPULATED` / `CLEARED` / `NOT_OBSERVED`); `ANONYMIZED` label + populated slot → EXPOSED; bare label → `LABEL_ONLY`; tombstone with the reference cleared → `RETAINED_RECORD_MISSING`; backup signal conflict in one observation → UNKNOWN; past `RESTORE_BACKUP` claim does not set `restore_state`; support T2 attachment beats T3 excerpt; legacy contact index → SECONDARY_IDENTIFIER [ASSUMPTION test] | D.3 |
+| D.4 dependencies | D1 violation → validator error; D2 conflict → reported, order unchanged; claim-derived edges do not create scope links; different resource IDs need an explicit `REPLICATES` edge | D.4.3 |
+| E.1 intent | E.1.3 list, including mixed-intent fixtures and the UNSURE → held route with the LLM disabled | E.1 |
+| E.3 conflicts | Same-time, same-quality disagreement → UNKNOWN; Q2 summary vs Q1 record → `RESOLVED_BY_QUALITY`; claim never supersedes an observation; started/completed lines of one trace are not a conflict | E.3.1 |
+| **M7 decision (gate)** | See G.1.1. This **replaces** the earlier "no finding ⇒ COMPLETE" test, which is withdrawn. | E.4.2, A.4.5 |
+| M8 steps | `len(verify) == len(REQ)` for COMPLETE and INCOMPLETE; duplicate key raises; activity "performed" claims produce no step; `system_id` precedence and `SYSTEM_AMBIGUOUS` hold; sort order from `OPERATIONS`; numbering | F.1 |
+| F.2 citations | One failing fixture per check 1–6 (activity ID rejected; late file rejected; other resource; workflow-only resource; observation that does not show the claimed state; `SUPERSEDED` ref); multi-observation-only proof → `CITATION_UNSUPPORTED` hold (current Q-SPLIT-PROOF rule) | F.2 |
+| M9 writer/validator | Each L1–L4 rule has a failing fixture; CSV round-trip with quotes; `[]` literal; `ROW_SORT_KEY` used by both writer and validator; held result passed to the writer raises | F.3–F.4 |
+
+#### G.1.1 Decision-gate tests (M7)
+
+Each test uses a fixture whose sets are built from observations, not injected directly. That way the test exercises E.4.1.
+
+| # | Fixture | Expected | Rule |
+|---|---|---|---|
+| D-1 | All `REQ` members `COMPLIANT_PROVEN`, each with a single-file citation | COMPLETE, one cited verification per `REQ` member | E.4.2 |
+| D-2 | Four members proven compliant; one member with no admissible observation (the E.4 marketing-profile example) | **held** `REQUIRED_RESOURCE_UNRESOLVED`, **not** COMPLETE | E.4.2 |
+| D-3 | No findings because every member is UNKNOWN | held, not COMPLETE | E.4.2 |
+| D-4 | One expressible violation, others determinable | INCOMPLETE; verification count = `|REQ|` | E.4.2, E.5 |
+| D-5 | One violation + one UNKNOWN member | held `VERIFICATION_SET_INCOMPLETE` | E.4.2 |
+| D-6 | No violations; one `RETAINED_RECORD_MISSING` | held `RETAINED_RECORD_MISSING` | D.3.9 |
+| D-7 | Primary-account slot empty (account only a workflow candidate) | held `REQUIRED_RESOURCE_UNRESOLVED` | C.6(a) |
+| D-8 | Category-ambiguous member | held | D.1.4 |
+| D-9 | Equal-time conflicting observations on a member | held (UNKNOWN `CONFLICTING_OBSERVATIONS`) | E.3.1 |
+| D-10 | Unresolved identity + DELETION intent | held `IDENTITY_UNRESOLVED` | E.2.1 |
+| D-11 | Unresolved identity + NON_DELETION intent | NOT_APPLICABLE `[]` | E.2.1 |
+| D-12 | UNSURE intent, LLM disabled | held `UNSURE_INTENT` | E.1.2 |
+| D-13 | Exception raised inside assessment | held `ERROR`; no INCOMPLETE or NOT_APPLICABLE row | F.3.1 |
+
+#### G.1.2 Identity expectations on the real dataset
+
+- Unit tests assert **function behaviour** only, per C.4.
+- They do not assert that every dataset email resolves.
+- The current counts (518/518 and 32/32 resolve; 418 current / 100 historical [FACT, C.4]) are recorded as **observed data metrics** in the run summary and the evaluation report.
+- If a future input contains an unresolvable email, the correct behaviour is a hold (D-10). That is **not** a test failure.
 
 ### G.2 Integration tests
 
-- Full pipeline on a miniature synthetic dataset (G.5) → exact expected CSV.
-- Full real run: 518 rows, validator clean, deterministic (two runs → byte-identical `output.csv`; hash compared).
+The successful path and the held path are tested separately (F.3.2, A.8.3).
 
-### G.3 Regression on the 32 public samples (`code/evaluation/main.py`)
+| # | Scenario | Input | Expected |
+|---|---|---|---|
+| I-1 | **Successful run** | Synthetic mini-dataset (N cases) in which every case resolves to COMPLETE, INCOMPLETE or NOT_APPLICABLE | Root `output.csv` with exactly N rows; validator L1–L4 clean; exit 0. A second run is **byte-identical** (SHA-256 of the file compared). |
+| I-2 | **Held run** | Same dataset plus one case built to be held (e.g. G.5 CC3) | **No** root `output.csv` created; `runs/<ts>/staging_output.csv` has N rows; `held_report.md` lists the held case with reason and sets; non-zero exit; the diagnostic prints counts by reason |
+| I-3 | Held run with a pre-existing `output.csv` | As I-2, with an older `output.csv` present | The older file is **unchanged** (hash compared); the diagnostic says it is stale |
+| I-4 | Validator failure | Fault-injected step builder producing an L2 violation | Same as I-2 (`VALIDATION_FAILED`), no root file |
+| I-5 | Leakage guard | Run I-1 with `sample_output.csv` absent or unreadable | Identical output hash (G.3.3) |
+| I-6 | Real data, current state | `dataset/` as provided | Expected to follow the **held path**: at least case_01, 02, 04, 07, 08, 10 and case_31 are projected to be held (A.8.3, F.6). The test asserts that the behaviour is the held path whenever held > 0. It does **not** assert a row count of 518 in that case. |
+| I-7 | Real data, final | Only after held = 0 or an authorized A.8.3 decision | 518 rows, validator clean, byte-identical rerun |
 
-Run the pipeline on `sample_deletion_requests.csv` and score against `sample_output.csv`:
+### G.3 Evaluation on public samples (`code/evaluation/main.py`)
+
+The evaluator runs the production pipeline on `sample_deletion_requests.csv` with the full dataset context. It then compares the emitted results and held list to `sample_output.csv`.
+
+#### G.3.1 Step alignment (unambiguous)
+
+Per case:
+
+1. Steps are keyed by `K = (operation, system_id, resource_id)`. Within one output the key must be unique (F.1.1(4)). [FACT] It is unique in all 32 sample answers.
+2. If either side contains duplicate keys anyway (a defect being evaluated), the *k*-th occurrence on one side is paired with the *k*-th occurrence on the other. Extra occurrences are unmatched.
+3. **Strict match** = same `K` **and** same `phase`, `state` and `evidence_id`.
+4. For field-level diagnostics, a second alignment uses `K' = (resource_id, phase)`, which is also unique in all sample answers [FACT], with the same occurrence rule. It is used to report *which* field differs (`operation`, `system_id`, `state`, `evidence_id`) when `K` differs.
+
+#### G.3.2 Metrics
+
+All are reported per case and in aggregate, labelled **public-sample metrics**. No hidden-test score is estimated or claimed.
 
 | Metric | Definition |
 |---|---|
-| Case status accuracy | `deletion_status` equal |
-| Step-level P/R/F1 | multiset match on `(phase, system_id, resource_id, operation, state, evidence_id)` |
-| Field-level accuracy | per field over aligned steps (aligned by `(operation, resource_id)`) |
-| Sequence accuracy | exact ordered-list equality per case; also normalised LCS ratio |
-| Citation accuracy | evidence_id equality on aligned cited steps |
+| Status accuracy | Emitted status = expected status, over all 32 cases. A held case counts as **not correct**. It is also reported in a separate `HELD` column of the confusion matrix. |
+| Status confusion matrix | Expected {COMPLETE, INCOMPLETE, NOT_APPLICABLE} × predicted {same three + HELD} |
+| **False-COMPLETE count** (safety) | Predicted COMPLETE where expected ≠ COMPLETE. Also, an internal invariant check: predicted COMPLETE where any `REQ` member lacks an F.2-valid citation. **Must be 0**; any non-zero is a defect. |
+| Step precision / recall / F1 | Strict matches (G.3.1 rule 3) over predicted / expected steps. Held cases contribute 0 predicted steps. |
+| Field accuracy | Per field over `K'`-aligned pairs |
+| Sequence accuracy | Exact ordered equality of the step list per case; also a normalised LCS ratio |
+| Citation accuracy | `evidence_id` equality over `K`-aligned FINDING and COMPLETE-verification steps |
+| **Invalid-citation count** | Predicted citations failing any F.2.1 check, or with `captured_at > audit_at`. Must be 0. [FACT] The sample answers themselves have 0 citations after cutoff. |
+| **Required-resource coverage** | Per case: \|predicted step resources ∩ expected step resources\| / \|expected step resources\|. This is a diagnostic proxy: the expected answers are used only in evaluation. Also the internal ratio \|`REQ` with a decided verdict\| / \|`REQ`\|. |
+| **Unresolved-resource count** | Size of `UNRESOLVED` per case, by reason code |
+| **Held-case rate** | Held cases / total, by reason |
+| Unexpected-resource count | Predicted step resources not in the expected answer (over-scoping diagnostic) |
 
-Each failure is reported with the explain trace and categorised by U-item.
+#### G.3.3 Anti-leakage
 
-**Anti-leakage rules [PROPOSAL]:**
+1. **Primary control: access separation.**
+   - The loader (M1) opens only an allow-list of input files. `sample_output.csv` is not on it, and an attempt raises.
+   - The evaluator passes no expected values into the pipeline.
+   - Tests:
+     - the loader rejects the path;
+     - I-5 gives identical output with the file absent;
+     - an import-rule test confirms `code/audit/**` does not import `code/evaluation/**` (B.2).
+2. **Supplementary control: grep.** Production sources must contain no `sample_output`, `case_\d+`, `evidence_\d+`, `activity_\d+` or `audit_\d+` literals, and no resource-ID literals outside an allow-listed format example. Grep alone is not considered sufficient: it can miss indirect leakage and can flag harmless strings. A hit triggers review, not automatic acceptance or rejection.
+3. **Change control for rules and flags.** Every flag value or rule change needs a written entry: the general rule it implements, the edge-case tests that cover it, and its effect on public-sample metrics.
+   - A change justified **only** by improved sample metrics is rejected.
+   - A change that improves any sample case by weakening identity linkage (C.4–C.6), cutoff admissibility (C.7), coverage (C.8) or evidence requirements (D, F.2) is rejected. Examples: enabling workflow-only steps, accepting a late file as state proof.
+   - The A.8.1 decisions are fixed inputs to evaluation, not variables to tune.
 
-1. Production code under `code/audit/` must not open `sample_output.csv`; a unit test greps for it.
-2. No literal `case_\d+` or specific `resource_id` / `evidence_\d+` constants in production code; a test greps for them.
-3. Feature flags are chosen by sample metrics **and** a written justification. A flag that only helps a single case is rejected.
-4. Report sample metrics as public-sample metrics only. Never extrapolate a hidden-test score.
+### G.4 Edge cases: expected decision and required evidence
 
-### G.4 Edge-case test list
+Each edge case asserts the decision **and** the evidence conditions that justify it.
 
-1. Request email historical only (case_10/29/30 style).
-2. Identifier only as an old email hash (case_12 style).
-3. Two users with similar emails / `.jr` suffix decoy.
-4. Evidence captured exactly at `audit_at` (case_09: 08:37 ≤ 09:00; evidence_51 at 12:00 = audit 12:00).
-5. File captured after cutoff with inner times before cutoff (evidence_02/06).
-6. Observation dated after its file capture (evidence_13/36).
-7. FAILED delete claim + 404 evidence → ABSENT (case_25).
-8. SUCCESS claim + replica copy or later write → PRESENT (case_05, case_10, case_24).
-9. Retained audit record present; legal hold present.
-10. Backup restorable via `eligible=true` in an ERROR-level line.
-11. Connector enabled only visible in a screenshot (older) vs log (newer).
-12. Identifier-free analytics with a unique vs shared workflow window.
-13. Same subject with two requests at different cutoffs (`case_33` / `case_52`; earlier-episode exclusion).
-14. Non-deletion with deletion words in negation.
-15. Subject with no observations at all.
+| # | Edge case | Expected decision | Evidence conditions asserted | Rule |
+|---|---|---|---|---|
+| E-1 | Request email is historical only | Subject resolved as historical | Association to `audit_id` with window; the matched resource link uses the historical email via `RECORD_FIELD` | C.4, C.5.2 |
+| E-2 | Identifier only as an old email hash | Link via `RECORD_FIELD` (hash slot) | The hash equals `sha256(old email)` and is paired in the audit log | C.3, C.4 |
+| E-3 | Look-alike email (`.jr` suffix, digit change) | No link | No `IdentifierHit` for the look-alike; the document is excluded with no reason needed (never a candidate) | C.3, C.5.2 |
+| E-4 | Evidence captured exactly at `audit_at` | Admissible for state and citation | `captured_at == audit_at` and observation time ≤ `audit_at` | C.7 row 2 |
+| E-5 | File captured after `audit_at`, inner time before | Link allowed; **no** state, **no** citation | Link carries `LINK_EVIDENCE_POST_CUTOFF`; the resource's state dimensions are UNKNOWN unless other admissible evidence exists; no step cites the file | C.7 row 4, A.8.1 |
+| E-6 | Observation dated after its own file capture | Not admissible for state, citation or link | `observed_after_capture` anomaly present | C.7 rows 8–9 |
+| E-7 | FAILED delete claim + 404 | ABSENT **only if** the 404 is a named negative (A.4.2a): the 404 line names the resource, the observation is admissible for state, the resource is linked to the subject, no later admissible positive observation exists in any copy, and the file passed extraction | Each condition asserted. A 404 that does not name the resource, or one superseded by a later replica row, gives UNKNOWN or PRESENT, respectively. The FAILED claim is attached as `CLAIM` and unused. | A.4.2, C.8.2, E.3.1 |
+| E-8 | SUCCESS delete claim + replica row present later | PRESENT → REMAINING | Replica copy observation admissible and later than any absence proof | C.8.2 |
+| E-9 | Audit record with `retention_until > audit_at` | `VERIFY_RECORD_PRESENT` | The single cited observation shows the record and `retention_until` (F.2.3) | D.2.3, F.2.3 |
+| E-10 | Audit record present, retention field never observed | held (current rule; Q-RETENTION-UNOBSERVED open) | Condition `UNKNOWN(CONDITION_UNKNOWN)` | D.2.3, F.6 |
+| E-11 | Backup `eligible=true deletion_block=false` on an ERROR-level line | RESTORABLE → RESTORE_RISK | Log level ignored; same observation has no contrary `restore_allowed=false` | D.3.6 |
+| E-12 | Connector enabled in an older screenshot, disabled in a newer log | DISABLED (compliant) | Newer admissible observation wins; the screenshot is used only if the media cache is valid | E.3.1, B.1.3 |
+| E-13 | Identifier-free analytics with a unique workflow claimant | Not in scope; no step; unresolved-scope report entry | `WORKFLOW_CANDIDATE` only | C.6, A.8.1 |
+| E-14 | Same subject, two requests | The later case excludes earlier-episode links with `EARLIER_EPISODE` | Link times vs the prior `audit_at` (Q-EPISODE default) | E.2.2 |
+| E-15 | Non-deletion text containing deletion words in negation | NOT_APPLICABLE | Matched `DELETION_NEGATION` clause recorded | E.1 |
+| E-16 | Subject with no admissible observations at all | held | Primary-account slot UNKNOWN | E.4.1 |
+| E-17 | Same-time conflicting observations | UNKNOWN → held | Both refs kept, roles `PROOF`/`CONTRARY` not assigned | E.3.1 |
 
-### G.5 Custom evaluation cases (≥3 required) [PROPOSAL]
+### G.5 Custom evaluation cases (≥3 required; 5 specified)
 
-Synthetic fixtures (fictional data, stored as Python builders, described in `evaluation_report.md`):
+Each case is a self-contained fictional mini-dataset built by a Python builder in `code/evaluation/custom_cases/`. It is documented in `evaluation_report.md` with every field below.
 
-- **CC1** historical-email-only remaining search record → INCOMPLETE.
-- **CC2** failed-claim + 404 + anonymized analytics with a citation at exactly `audit_at` → COMPLETE.
-- **CC3** late-captured file with an early inner observation showing a record present → must **not** create a finding.
-- **CC4** "remove me from marketing lists only" → NOT_APPLICABLE.
-- **CC5** replica-only copy → REMAINING_RECORD.
+Common to all five cases:
+
+- `requested_at = 2026-05-01T10:00:00Z`;
+- `reported_at = 2026-05-02T10:00:00Z`;
+- `audit_at = 2026-05-10T12:00:00Z`, unless stated otherwise.
+
+Expected outcomes are derived from the cited rules and are re-derived if a rule changes.
+
+#### CC1 — Historical-email-only remaining search entry → INCOMPLETE
+
+| Element | Specification |
+|---|---|
+| Request | email `old.cc1@example.org`; text "Please permanently delete my account." |
+| Identity | `user_9001`, current email `new.cc1@example.org`. Audit-log rows (`email`, `email_hash`) at 2026-01-10 change old → new; hashes = sha256 of each email. |
+| Evidence (all captured 2026-05-08) | (a) Readback log trace: started `lookup_key=new.cc1@example.org`, completed `resource_id=account_90001 rows=0 http_status=404`. (b) Bundle snapshot `search_service/customer_search_documents`: `search_90001` with `email=old.cc1@example.org`. (c) Ledger record `audit_record_90001 subject_reference=user_9001 retention_until=2030-12-31T23:59:59Z result=FOUND`. |
+| Links | account: `TRACE_KEY`; search: `RECORD_FIELD` (historical email); audit: `RECORD_FIELD` (`user_id`) |
+| `REQ` | `account_90001` (USER_PROFILE, DELETE), `search_90001` (SEARCH_INDEX_ENTRY, DELETE), `audit_record_90001` (SECURITY_AUDIT_LOG, RETAIN, condition TRUE) |
+| Verdicts | account COMPLIANT (named 404); search VIOLATION (present); audit COMPLIANT (present + retention in the same observation) |
+| Expected | INCOMPLETE: F `REPORT_REMAINING_RECORD search_90001` [cites (b)]; R `DELETE_RECORD search_90001`; V `VERIFY_RECORD_ABSENT account_90001`, `VERIFY_RECORD_ABSENT search_90001`, `VERIFY_RECORD_PRESENT audit_record_90001` (all `""`), sorted per A.3.1 |
+| Rules | C.4, C.5.2, D.2.3, E.4.2, E.5, F.2 |
+
+#### CC2 — Fully proven compliant case with a misleading FAILED claim → COMPLETE
+
+| Element | Specification |
+|---|---|
+| Request | `cc2@example.org`; "Please erase my account and personal data." |
+| Identity | `user_9002`, current email, no history |
+| Claims | Activity `DELETE_RECORD account_90002 FAILED` at 2026-05-02 (claim; must be ignored as proof) |
+| Evidence | (a) Service export captured **exactly 2026-05-10T12:00:00Z** (= `audit_at`): `profile_lookups` `account_90002 status_code=404`, plus `analytics_profiles` `analytics_90002` with `customer_reference=null, email=null, phone=null, email_hash=null`. (b) Ledger captured 2026-05-09: `audit_record_90002 subject_reference=user_9002 retention_until=2031-12-31T23:59:59Z FOUND`. (c) Activity `LINK_RESOURCE_IDENTITY analytics_90002 … cc2@example.org and user_9002` at 2026-05-01. (d) Readback log captured 2026-05-09: started `lookup_key=cc2@example.org`, completed `resource_id=account_90002 rows=0 http_status=404`. |
+| Links | account: `TRACE_KEY` via (d), keyed by `cc2@example.org` (the export in (a) carries no identifier, so it supplies state, not identity); analytics: `CATALOG_CLAIM` (c), MEDIUM, grounded per C.5.2 (not a workflow candidate); audit: `RECORD_FIELD` |
+| `REQ` | the three resources above. Primary-account slot filled. |
+| Verdicts | account COMPLIANT (named negatives in (d) and (a); the latest admissible one, (a) at the boundary time, is cited — C.7 row 2, F.2.2); analytics COMPLIANT (all 4 slots CLEARED in **one** observation, D.3.3 / F.2.3); audit COMPLIANT (presence + retention in one observation) |
+| Expected | COMPLETE with exactly three verification steps: `VERIFY_RECORD_ABSENT account_90002` [cites (a)], `VERIFY_RECORD_PRESENT audit_record_90002` [cites (b)], `VERIFY_RECORD_ANONYMIZED analytics_90002` [cites (a)] |
+| Negative variant CC2-n | Remove `email_hash` from the analytics observation (slot `NOT_OBSERVED`) → held `REQUIRED_RESOURCE_UNRESOLVED`, not COMPLETE |
+| Rules | A.4.5, C.7, D.3.3, E.4.2, F.2.1–F.2.3 |
+
+#### CC3 — Late-captured evidence cannot create a finding or citation → held
+
+| Element | Specification |
+|---|---|
+| Request | `cc3@example.org`; "Please delete my account." |
+| Identity | `user_9003` |
+| Evidence | (a) Admissible readback (captured 2026-05-08): `account_90003` 404 via `TRACE_KEY`. (b) Log file **captured 2026-05-12** (after `audit_at`) whose line at 2026-05-09 shows `search_90003 result=hit` in a trace keyed by `cc3@example.org`. No other evidence mentions `search_90003`. |
+| Links | account: `TRACE_KEY`; search: `TRACE_KEY` with note `LINK_EVIDENCE_POST_CUTOFF` (link-only, A.8.1 Q-LATE-LINK) |
+| `REQ` | account, search |
+| Verdicts | account COMPLIANT; search **UNKNOWN** (`POST_CUTOFF_ONLY`: the only state evidence is in the late file) |
+| Expected | **held** `REQUIRED_RESOURCE_UNRESOLVED`. Assertions: no `REPORT_REMAINING_RECORD` for `search_90003`; no step cites file (b); the case is absent from staging output and present in the held report. |
+| Rules | C.7, A.8.1, E.4.2, F.2.1 check 2 |
+
+#### CC4 — Marketing-only request → NOT_APPLICABLE
+
+| Element | Specification |
+|---|---|
+| Request | `cc4@example.org`; "Please remove me from marketing lists only. I still want order receipts." |
+| Identity | `user_9004` (resolvable; irrelevant to the output) |
+| Evidence | A profile present (status 200) and a marketing profile present, to show that evidence does not change the result |
+| Expected | NOT_APPLICABLE, `[]`. Intent clauses: `MARKETING_ONLY`, `SCOPE_LIMIT`. No `DELETE_REQUEST` (the object of "remove" is marketing lists). |
+| Rules | E.1.1–E.1.2 |
+
+#### CC5 — Replica-only copy of the profile → INCOMPLETE
+
+| Element | Specification |
+|---|---|
+| Request | `cc5@example.org`; "Please close my account and delete my data." |
+| Identity | `user_9005` |
+| Evidence | SQL dump (captured 2026-05-09) with collection-level tables `customer_profiles_primary` (no `account_90005` row) and `customer_profiles_failover_replica` (row `account_90005, user_9005, cc5@example.org, ACTIVE`). No audit record exists for the subject. |
+| Links | account: `RECORD_FIELD` (`user_id` and email in the replica row) |
+| Policy | USER_PROFILE, rule_01 DELETE ("Always") |
+| `REQ` | `account_90005` only |
+| Verdicts | existence: primary copy ABSENT (C.8 collection coverage), replica copy PRESENT → resource PRESENT → VIOLATION |
+| Expected | INCOMPLETE: F `REPORT_REMAINING_RECORD account_90005` [cites the dump]; R `DELETE_RECORD account_90005`; V `VERIFY_RECORD_ABSENT account_90005` |
+| Conditional note | If the approved rules change (e.g. C.8 coverage levels), the expected result is re-derived from the new rule, not kept for its own sake. |
+| Rules | C.8.2, D.2.2, E.4.2 |
+
+### G.6 Conflicts with other sections (recorded, not edited)
+
+| Previous G statement | Conflicting decision | Status |
+|---|---|---|
+| "M7 decision: no finding ⇒ COMPLETE" | A.4.5, E.4.2 completeness gate | **Withdrawn in G** (G.1, G.1.1) |
+| "518/518 and 32/32 emails resolve" as a test assertion | C.4 / E.2.1 unresolved-identity hold | **Changed in G** to a data metric (G.1.2) |
+| "Full real run: 518 rows, validator clean, deterministic" | A.8.3, F.3.2 held path | **Split in G** into I-1…I-7 |
+| "Field-level accuracy aligned by (operation, resource_id)" | Ambiguous with duplicates | **Replaced in G** by G.3.1 |
+| Anti-leakage relying on grep and sample metrics | — | **Replaced in G** by G.3.3 |
+
+Remaining contradictions outside G that affect testing:
+
+- **H (roadmap):** has no stages for gate tests, held-path integration (I-2…I-4) or custom-case builders.
+- **I (risks):** R10–R12, R18 and R19 are superseded by E/F. Q-SPLIT-PROOF and Q-RETENTION-UNOBSERVED are not listed.
+- **J (checklist):** still requires "518 rows" without the held-path condition, and lacks the false-COMPLETE = 0 and invalid-citation = 0 gates.
+- **A.5, A.4.5, B.3/B.4.3, C.6/C.7, D.6, E.8, F.6:** their alignment lists are unchanged.
+
+Open decisions that tests are currently written against (conservative rule):
+
+| Decision | Tests affected |
+|---|---|
+| Q-SPLIT-PROOF | F.2 test, CC2-n |
+| Q-RETENTION-UNOBSERVED | E-10 |
+| Q-EPISODE | E-14 |
+| Q-SORT | writer/validator order |
+| D-assumptions | legacy contact index test |
 
 ---
 
