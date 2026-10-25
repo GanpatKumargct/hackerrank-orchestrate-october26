@@ -835,177 +835,375 @@ M1 referential and consistency checks:
 
 ## C. Evidence and identity resolution
 
+Section C implements three things from earlier sections:
+
+- the evidence side of the A.4.2 verdicts;
+- the scope reason codes of M5 (B.5);
+- the coverage contract of B.3.2.
+
+It separates three questions that the earlier draft blended together:
+
+1. **Normalisation**: is this string the same identifier?
+2. **Association**: did this identifier belong to the subject, and when?
+3. **Linkage**: does this record belong to the subject, or contain the subject's data?
+
+A normalised match is only a **candidate**. It never proves linkage on its own.
+
 ### C.1 Format-specific parsing [FACT for formats; PROPOSAL for handling]
 
-**SQL (24 files).** Execute each file in a fresh in-memory `sqlite3` connection (all files load cleanly [FACT]). Three observed shapes:
+**SQL (24 files).** Each file is executed in a fresh in-memory `sqlite3` connection; all 24 load cleanly [FACT]. Every SQL file's header (`-- Captured at:` / `snapshot_completed_at`) equals the manifest `captured_at` [FACT: 24/24].
 
-| Shape | Tables [FACT] | Handling |
-|---|---|---|
-| Inventory | `snapshot_scope(origin_system, captured_at)`, `customer_profiles`, `customer_search_documents`, `customer_analytics_profiles`, `support_records`, `customer_exports`, `connector_subscriptions`, `backup_restore_entries`, `security_audit_records` | One observation per row. `system_id` comes from the table → system map. `snapshot_scope` lists the systems the snapshot covers (needed for omission, C.8). |
-| Topology replicas | `customer_data_primary`, `customer_data_read_replica`, `customer_data_replica_ap_south/eu_west`, `customer_data_reporting_replica`, `customer_data_failover_replica` with `(resource_id, origin_system, collection_name, record_json, updated_at)` | Parse `record_json` (a nested JSON string). One observation per (row, table). `copy_location` = table name. |
-| Direct | `customer_profiles_primary`, `customer_profiles_failover_replica`, `search_documents_primary` | One observation per row; capture `source_resource_id` as `related_ids`. |
+| Shape | Tables [FACT] | Handling | Coverage declared (C.8) |
+|---|---|---|---|
+| Inventory (`customer_data_inventory_*`) | `snapshot_scope(origin_system, captured_at)` plus `customer_profiles`, `customer_search_documents`, `customer_analytics_profiles`, `support_records`, `customer_exports`, `connector_subscriptions`, `backup_restore_entries`, `security_audit_records` | One observation per row; `system_id` from the table → system map | **System-level**: the systems listed in `snapshot_scope` |
+| Topology extracts (`customer_data_{read,failover,reporting}_replica_*`, `customer_data_regional_replicas_*`) | `customer_data_primary` plus one or more replica tables, each `(resource_id, origin_system, collection_name, record_json, updated_at)` | Parse nested `record_json`; one observation per (row, table); `copy_location` = table | **None for omission.** [FACT] Every primary table holds exactly 10 `security_audit_events`, and `customer_profiles` appears only in replica tables, never in a primary table. These are curated drift extracts, not complete tables. |
+| Direct tables (`customer_accounts_failover_replica_*`, `customer_search_primary_*`) | `customer_profiles_primary`, `customer_profiles_failover_replica`, `search_documents_primary` | One observation per row; `source_resource_id` → `related_ids` (relationship `DERIVED_FROM`, C.5) | **Collection-level**: each table covers its named collection for its named copy |
 
-- SQL observation time = the file capture. The header `-- Captured at:` / `snapshot_completed_at` matches the manifest for all 24 files [FACT].
-- Row `updated_at` is stored as a field, **not** as observation time.
+Row `updated_at` is stored as a field, not as observation time. SQL observation time is the file capture.
 
-**JSON (28 files).** A recursive walker emits an observation for every dict containing `resource_id` and inherits context keys from ancestors (`captured_at`, `data_store`, `collection`, service/collection keys such as `service_exports.account_service.profile_lookups`).
+**JSON (28 files).** A recursive walker emits one observation per dict containing `resource_id`. It inherits context (`captured_at`, `data_store`, `collection`, service/collection keys) from ancestors.
 
-| Shape [FACT] | Inner time | Notes |
-|---|---|---|
-| `customer_data_snapshot_bundle_*` → `snapshots[].{captured_at,data_store,collection,records[]}` | snapshot `captured_at` | Collections include `operational_record_history` (with `recorded_at`, `lookup_value`), `support_conversations` (`message_text` with embedded emails), `ticket_attachments` (`uploaded_by`), `backup_catalog`, `retained_order_records`, `deleted_customer_references`. |
-| `service_resource_export_*` → `service_exports.{svc}.{coll}[]` | `observed_at` | `status_code` 200/404; `hits.documents[]` nested results (each nested doc is its own observation). |
-| manifest/ledger style (`connector_configurations_*`, `customer_export_manifest_*`, `security_audit_ledger_*`) → `records[]` | `recorded_at` | `{system, resource_id, record_type, result, subject_reference}`. **Filenames do not describe content** [FACT: `connector_configurations_20260812.json` contains profile lookups]. |
-| `customer_analytics_report_*`, `customer_export_jobs_*` | file `captured_at` | — |
+| Shape [FACT] | Inner time | Notes | Coverage declared |
+|---|---|---|---|
+| `customer_data_snapshot_bundle_*` → `snapshots[].{captured_at, data_store, collection, records[]}` | snapshot `captured_at` | Includes `operational_record_history` (`recorded_at`, `lookup_value`), `support_conversations` (`message_text` may embed emails; `[REDACTED]` marker), `ticket_attachments` (`uploaded_by`), `backup_catalog`, `retained_order_records`, `deleted_customer_references` | **Collection-level** per snapshot entry, including explicit empty `records: []` [FACT: evidence_07, 31, 51] |
+| `service_resource_export_*` → `service_exports.{svc}.{coll}[]` | `observed_at` | `status_code` 200/404; `index_queries` hold `query` **and** `hits.documents[]`. The query value is the lookup key, not the document's content (C.5.2). | None |
+| Ledger style (`connector_configurations_*`, `customer_export_manifest_*`, `security_audit_ledger_*`) → `records[]` | `recorded_at` | `{system, resource_id, record_type, result, subject_reference}`. **Filenames do not describe content** [FACT]. | None |
+| `customer_analytics_report_*`, `customer_export_jobs_*` | file `captured_at` | — | None |
 
-**Logs (26 files), four line formats [FACT]:**
+**Logs (26 files), four line formats [FACT]:** `key=value`, `TS {json}`, syslog, cloud-runtime (`requestId=… message="…"`). Pipe-delimited rows also appear, and the handover TXT uses the same pipe layout.
 
-1. `TS level=… service=… key=value …`
-2. `TS {json}`
-3. syslog `TS <pri>1 host service trace - - key="v" …`
-4. cloud-runtime `TS requestId=… function=svc message="k=\"v\" …"`
+- Lines are grouped by trace ID (`trace_id`, `requestId`, syslog trace column, `rb-…`, `tr-rp-…`).
+- One observation is emitted per `resource_id` on a state-bearing line (`*_completed`, `*_evaluated`, `connector_heartbeat`, `message_pii_scan`, `deletion_marker_check`, `record_lookup`, …). Its observation time is that line's timestamp.
+- Keys from the trace's `*_started` line (`lookup_key`, `subject_key`, `subject_ref`, `match_key`, `scan_key`) and any `correlation_key` are attached as **trace keys**, with relationship `TRACE_KEY` (C.5).
+- Known-noise events (`connection_acquired`, `dependency_retry`, `cache_lookup`, `timer_tick`, `disk_latency`, …) are counted as noise for the `ExtractionReport` (B.3.2).
+- Log level words carry no state [FACT].
 
-Additionally, pipe-delimited lines appear in some logs and in the handover TXT.
+**PDF (4).** Standard-library extractor (B.1.2). The text runs become observations attached to the resource IDs they name. Observation time is the in-document `captured …` / `issued …` timestamp if present, otherwise the file capture. The disputed-orders register has no resource IDs, so it yields context only, never a step [FACT].
 
-- Parse every line into `(ts, service, trace_id, kv)`.
-- **Group by `trace_id`** (`trace_id`, `requestId`, syslog trace column, `rb-…`, `tr-rp-…`). A trace yields one observation per `resource_id` that appears in a `*_completed` / state-bearing line. It inherits the `lookup_key` / `subject_key` / `subject_ref` / `match_key` / `scan_key` / `correlation_key` from the trace's `*_started` line as **trace-linked identifiers**.
-- Observation time = the timestamp of the state-bearing line.
-- Lines without `resource_id` and noise events (`connection_acquired`, `dependency_retry`, `cache_lookup`, `timer_tick`, `disk_latency`, …) are ignored.
-- **Log level words carry no state** (an `ERROR` line can report `eligible=true`) [FACT].
+**PNG (11).** Read from `code/media_cache/` after hash verification (B.1.3). Each cached record becomes an observation with `source_format=image`. A missing or mismatched cache entry is `FAILED` in the `ExtractionReport`, not "no data".
 
-**Text (`customer_account_handover_20261001.txt`).** Pipe-delimited rows `TS | system | resource_id | record_type | result | subject`.
+### C.2 Provenance preservation and its tests
 
-**PDF (4) / PNG (11).** Media extraction (M1/M2 option) produces the same `Observation` structure with `source_format=pdf|image`. Observation time = the `captured …` / `issued …` timestamp in the document if present, otherwise the file capture.
+Every `Observation` keeps the following unchanged:
 
-- Observed content [FACT, inspected visually]:
-  - support attachment with customer contact data (`support_001`)
-  - customer statement (`user_18`)
-  - disputed-orders register (rows with `user_NN`, no resource IDs)
-  - compliance journal (`audit_record_003`)
-  - consoles for accounts, analytics, connectors, exports, marketing, object storage, search, support, backup, security, deleted-account reference
-- **[PROPOSAL]** Committed cache file `code/evaluation/media_extractions.md` (or `.py` data module), generated by `media.py --extract`, containing per-file structured facts and the extraction method. The pipeline reads only the cache at run time (deterministic). Manual transcription is **not** allowed.
+- `file_id`, `file_captured_at`, and the **raw** capture string;
+- `observed_at`, the **raw** inner timestamp string, and `time_basis` (`inner` | `file`);
+- `locator` (table, JSON path, trace ID + line numbers, PDF run index, cache record index);
+- `system_id` with the field it came from;
+- `resource_id`, `related_ids` with relationship types;
+- raw `record_type` / `collection`;
+- the field map with **raw values** and, separately, normalised values;
+- identifiers as `IdentifierHit{kind, raw, normalised, field, relationship, locator}`;
+- anomalies.
 
-### C.2 Preserved metadata [PROPOSAL]
+Normalisation **adds** normalised values. It never replaces raw values, timestamps or provenance.
 
-Every `Observation` keeps:
+Downstream rule: admissibility (C.7), citation (F.2) and validation (A.5 L3) read only these preserved fields. They never re-derive time or source from normalised data.
 
-- `file_id` and `file_captured_at`
-- `observed_at` and `time_basis` (inner vs file)
-- `locator` (table, JSON path, trace id, line number)
-- `system_id` and the field it came from
-- `resource_id`, `related_ids`
-- the raw `record_type` / `collection`
-- the canonical fields
-- the identifier set, with provenance (`field:email`, `field:lookup_key`, `freetext:message_text`, `trace:started.lookup_key`)
-- anomalies
+Tests (`test_provenance.py`):
 
-Nothing is collapsed before M5/M6, so admissibility and citation decisions can be made later.
+1. For every parser, round-trip each fixture so that the raw timestamp strings equal the source text, and `file_captured_at` equals the manifest value.
+2. Normalising an observation leaves `raw` fields, `locator`, `file_id` and both timestamps byte-identical.
+3. An observation with no inner time has `observed_at=None` and `time_basis="file"`; it is never filled with the file time.
+4. A nested hit (`hits.documents[]`) keeps the parent query and its own locator separately.
+5. Trace keys are stored with relationship `TRACE_KEY` and never merged into the record's own fields.
 
-### C.3 Identifier normalisation [PROPOSAL]
+### C.3 Identifier normalisation (candidate matching only)
 
-| Kind | Normalisation | Match rule |
-|---|---|---|
-| email | strip, lowercase (evidence contains UPPERCASE variants [FACT]) | exact; word-boundary in free text: `(?<![\w.+-])email(?![\w-])` |
-| email_hash | lowercase 64-hex | exact. `sha256(lower(email))` equals `email_hash` for 850/850 users [FACT], so the hash of every historical email can be computed even if not logged. |
-| phone | keep `+` and digits only | exact on normalised digits |
-| user_id | `user_\d+` | exact with word boundary (substring matching mis-maps `user_43`→`user_430` [FACT]) |
-| name | **not used for matching** | names collide across decoys [FACT] |
+| Kind | Normalisation | Candidate match | Facts |
+|---|---|---|---|
+| email | trim; lowercase | Exact equality on a field value. In free text, a bounded match `(?<![\w.+-])…(?![\w-])`. | Evidence contains UPPERCASE variants [FACT] |
+| email_hash | lowercase 64-hex | Exact | Contract below |
+| phone | **canonical form = the exact digit sequence including country code and leading `+`** (separators removed); the raw string is kept | Exact canonical equality. **No** trunk-prefix stripping, no country-code inference, no partial or suffix matching. | [FACT] All 1,034 identity phones (current + historical) start with `+` and include a country code. 0 canonical collisions between users. Every phone string in evidence whose canonical form matches a known phone also matches its raw format; 3 phone-like strings in evidence belong to no known user. |
+| user_id | `user_\d+` | Exact with word boundary | Substring matching mis-maps `user_43`→`user_430` [FACT] |
+| name | not normalised for matching | **Never** a match key | Names collide with decoys [FACT] |
 
-### C.4 Subject resolution (M3) [PROPOSAL]
+If a future phone lacks `+`, it is not matched. It is recorded as `PHONE_UNCANONICAL`, which avoids country-code guessing.
+
+**Hash contract.**
+
+- Current identities: `email_hash == sha256(utf8(lower(trim(email))))` [FACT: 850/850].
+- Historical identities: for every audit-log event where the `email` and `email_hash` fields change at the same `(user_id, event_time)`, `sha256(old email) == old hash` and `sha256(new email) == new hash` [FACT: 107/107 pairs, 0 mismatches, 0 unpaired].
+- M1 enforces both checks. A mismatch is not auto-corrected: that identity's hash becomes `HASH_UNVERIFIED` and is used only as a recorded value, never computed.
+- Computed hashes are used only for emails whose pairing is verified.
+
+**Normalisation vs link confidence.** A normalised match creates an `IdentifierHit` (a candidate). Whether the hit links the *record* to the subject depends on the field's relationship type and on the conflict rules (C.5).
+
+### C.4 Subject resolution and identifier association (M3)
 
 ```text
 resolve(request_email):
   e = norm_email(request_email)
-  uid = identities.by_email.get(e)                         -> kind=current
-  if not uid: uid = audit_log users whose old/new email == e -> kind=historical
-  if not uid: return UnresolvedSubject(identifiers={email:e, hash:sha256(e)})
-  ids = current {email, phone, email_hash, user_id}
-      ∪ all old/new values from audit_log rows for uid (email, phone, email_hash)
-      ∪ {sha256(email) for every email}
-  record validity windows from audit_log event_time (for explain only; historical
-  identifiers are searched at all times because old systems retain them)
+  owners = association_index.owners_of(("email", e))   # all users that ever held e, with windows
+  if len(owners) == 1: uid = owners[0]; kind = "current" if current_email(uid)==e else "historical"
+  elif len(owners) > 1: return AmbiguousSubject(e, owners)    # identifier reused → held
+  else: return UnresolvedSubject(email=e, hash=sha256(e))
+  associations = for each identifier value ever held by uid (current + audit-log old/new):
+                   Association{kind, value, user_id, valid_from, valid_to, source: snapshot|audit_id}
 ```
 
-- [FACT] All 518 request emails resolve: 418 current, 100 historical. All 32 samples resolve (3 historical: case_10, 29, 30).
-- [FACT] One email appears in two evaluation cases (`case_33`, `case_52`) with different cutoffs; each case is evaluated independently.
+**Association windows are used, not just explained.**
 
-### C.5 Linking resources to the subject [PROPOSAL]
+- `valid_from`/`valid_to` come from audit-log `event_time`. The current snapshot value is open-ended from its last change.
+- [FACT] Audit-log chains are consistent: 302 chains, 0 breaks, and the last value equals the snapshot.
 
-Link evidence, strongest first. Each link records its supporting observation or activity ID.
+| Situation | Treatment |
+|---|---|
+| Identifier ever held by exactly one user [FACT: true for every identifier in the dataset — 0 values shared by >1 user] | A hit is attributable to that user **at any observation time**. Old systems keep historical values, so a hit dated after `valid_to` is expected and accepted, with the note `HISTORICAL_VALUE_AFTER_CHANGE`. |
+| Identifier held by more than one user (reuse/reassignment) | A hit is attributable only if its observation time falls inside exactly one owner's window. Otherwise the hit is `AMBIGUOUS_IDENTIFIER` and creates no link. |
+| Hit dated before the identifier's `valid_from` for its only owner | Accepted with the note `PRE_ASSOCIATION_HIT`. It is logged for review, because it may indicate data entry before the change was recorded. |
 
-| Strength | Mechanism | Example [FACT] |
+**Association vs ownership.** An association proves only that the identifier belonged to the subject. Whether a record is in scope is decided in C.5, from the field relationship of the hit.
+
+**Unresolved or ambiguous subject — output rule.**
+
+- `UnresolvedSubject` and `AmbiguousSubject` never produce a COMPLETE answer: the primary account cannot be proven, so the A.4.5 gate fails. The case is **held** with reason `IDENTITY_UNRESOLVED` / `IDENTITY_AMBIGUOUS`.
+- If intent is `NON_DELETION`, the output is `NOT_APPLICABLE`, `[]`. Identity is irrelevant to that output.
+- Otherwise the final mapping falls under Q-UNDETERMINED (A.8). Until it is decided, the readiness gate (J) blocks final generation.
+- Findings may still be computed for diagnostics, using only `RECORD_FIELD` hits on the request email/hash.
+- [FACT] 0 such cases in current inputs: 518/518 and 32/32 resolve to exactly one user (418 current, 100 historical; samples 29 current, 3 historical).
+
+`case_33` and `case_52` share an email, and are evaluated independently at their own cutoffs [FACT].
+
+### C.5 Linking records to the subject
+
+#### C.5.1 Link object
+
+Every link is stored as:
+
+```python
+@dataclass(frozen=True)
+class Link:
+    resource_id: str
+    subject: str                 # user_id
+    relationship: str            # see C.5.2
+    confidence: str              # STRONG | MEDIUM | CANDIDATE
+    source: EvidenceRef          # observation / activity / audit row that carries it
+    observed_at: datetime | None # time of the supporting observation (or activity event_time)
+    identifier: IdentifierHit | None
+    notes: tuple[str, ...]       # e.g. HISTORICAL_VALUE_AFTER_CHANGE, LINK_EVIDENCE_POST_CUTOFF
+```
+
+#### C.5.2 Relationship types and confidence
+
+| Relationship | Meaning | Confidence | Example [FACT] |
+|---|---|---|---|
+| `RECORD_FIELD` | The resource's **own** record has a subject identifier in an identifying field: `email`, `requester_email`, `owner_email`, `customer_email`, `uploaded_by`, `user_id`, `customer_reference`, `subject_reference`, `lookup_value`, hash fields | STRONG | `search_001` document email (case_06); `tombstone_9178` (case_32) |
+| `TRACE_KEY` | The resource is named on a trace's state-bearing line, and the trace's started line was keyed by a subject identifier. **Only if** the state-bearing line carries no own identifier field that names a *different* subject. If it carries its own identifier, that is evaluated as `RECORD_FIELD` and takes precedence. | STRONG | `account_7566` via `rb-085737-009` (case_03) |
+| `FREE_TEXT_MENTION` | A subject identifier appears inside free text (`message_text`, `message_excerpt`, PDF/PNG visible text) of the resource's record | MEDIUM. **The record contains the subject's personal data.** That justifies scope for PII treatment (REDACT/DELETE per category), but not ownership. | `support_1034.message_text` |
+| `QUERY_KEY_ONLY` | The subject identifier is the **query/lookup value**, and the returned document has its own identifier fields | **No link**, unless the document's own fields match (`RECORD_FIELD`). A query for X that returns a document for Y does not link Y's document to X. | search hits in `service_resource_export_*` |
+| `DERIVED_FROM` (foreign key) | Record A (STRONG-linked) has `source_resource_id = B` | MEDIUM link for **B**. A's own linkage is unchanged. If B is itself STRONG-linked to another subject, the FK creates no link (it may be a shared/indirect source). | `search_001 → account_006` [FACT: `source_resource_id` is the only FK field, 3 rows] |
+| `CATALOG_CLAIM` | A `LINK_RESOURCE_IDENTITY` activity names the resource with a subject identifier | MEDIUM. A claim: usable for scope, never for state or citation. | `object_19`, `tombstone_17` |
+| `WORKFLOW_CANDIDATE` | Deletion-workflow activity correlation (C.6) | CANDIDATE. Not a link; never proof. | case_21 `analytics_5335` |
+
+Links whose supporting evidence is admissible only via `LATE_INNER_LINKING` (C.7) carry the note `LINK_EVIDENCE_POST_CUTOFF`. They have the same relationship type but are flagged in reports.
+
+#### C.5.3 Inclusion, exclusion and conflict rules (deterministic)
+
+For each candidate resource R and case subject S, consider:
+
+- `L_S` = admissible links of R to S;
+- `L_O` = admissible STRONG/MEDIUM links of R to other subjects.
+
+| Rule | Condition | Decision (M5 reason code) |
 |---|---|---|
-| GROUNDED-direct | The observation for resource R itself contains a subject identifier in an identifying field (`email`, `requester_email`, `owner_email`, `customer_email`, `uploaded_by`, `subject_reference`, `customer_reference`, `user_id`, `lookup_value`, hash fields) or in its free text | `search_001` doc email (case_06); `support_1034.message_text` |
-| GROUNDED-trace | Same `trace_id`: the started line keyed by a subject identifier, the completed line names R | case_03 `account_7566` via `rb-085737-009` |
-| GROUNDED-fk | R is referenced by a foreign key from a grounded resource (`source_resource_id`) | `search_001.source_resource_id = account_006` |
-| CATALOG | `LINK_RESOURCE_IDENTITY` activity names R with a subject identifier. **It is a claim:** used for scope, never as state proof. | `object_19`, `tombstone_17` |
-| WORKFLOW (low) | See C.6. Only for resources with no grounded link to anyone. | case_21 `analytics_5335` |
+| I1 | `L_S` contains a STRONG link, and `L_O` is empty | Include: `GROUNDED_DIRECT` / `GROUNDED_TRACE` |
+| I2 | `L_S` contains only MEDIUM links, and `L_O` is empty | Include: `GROUNDED_FK` / `CATALOG` / `CONTAINS_SUBJECT_PII` |
+| I3 | `L_S` non-empty **and** `L_O` non-empty, with overlapping observation times (both identifiers in the same or same-time observations) | Include: `SHARED_RESOURCE`. Treatment per category (e.g. rule_05 REDACT for shared conversations). Only S's identifiers are evaluated for exposure. |
+| I4 | `L_S` and `L_O` both non-empty, at **different** times (ownership or content changed) | Include: `OWNERSHIP_CHANGED`. Existence/exposure are judged from the **latest admissible observation**, considering only S's identifiers. If S's identifiers are absent there, exposure is CLEAN for S. Both link sets are recorded. |
+| I5 | `L_S` contains only `CATALOG_CLAIM`, and `L_O` contains a STRONG link contradicting it | Exclude: `CATALOG_CONTRADICTED`. Logged. [FACT: `marketing_001` activity claim vs a screenshot showing a different identity] |
+| E1 | `L_S` empty, `L_O` non-empty | Exclude: `LINKED_TO_OTHER_SUBJECT` |
+| E2 | `L_S` non-empty, but every link predates the subject's previous deletion episode boundary (E, episode rule) | Exclude: `EARLIER_EPISODE` |
+| E3 | Only `WORKFLOW_CANDIDATE` | Not included in scope. Recorded as unresolved candidate `WEAK_LINK_ONLY` (C.6). |
 
-**Negative evidence.** If R has a grounded link to a *different* subject at any admissible time, R is excluded from this case (`excluded[R] = "linked_to_other_subject"`). Look-alike identifiers (`.jr` suffixes, different digits) never match because matching is exact [FACT: case_28 decoy].
+Exclusion is never applied from a single conflicting hit without these rules.
 
-**Conflicting claims.** If a CATALOG link conflicts with a grounded observation, the grounded observation wins and the conflict is logged. [FACT] `marketing_001` is linked by activity to one user while the marketing console screenshot shows a different person's identifiers.
+[FACT] Across all single-resource observations in the current evidence, no resource co-occurs with identifiers of more than one known subject, so I3/I4 do not arise today. They are specified so that a future occurrence is handled deterministically and visibly.
 
-### C.6 Identifier-free resources [PROPOSAL + UNRESOLVED]
+### C.6 Identifier-free resources and workflow candidates
 
-[FACT] Some required resources never co-occur with any identifier, only with a `deletion_worker` action. Examples: anonymized analytics in case_03/21/25–28 and handcrafted accounts in case_01/02/04/07/08/10. Readback-log adjacency gives the **wrong** answer (case_03) and must not be used.
+[FACT] Some resources expected in sample answers never co-occur with any identifier. Their only connection is a `deletion_worker` activity:
 
-**Workflow correlation** (explicitly labelled an inference, not an identity link):
+- anonymised analytics in case_03, 21, 25–28;
+- handcrafted primary accounts in case_01, 02, 04, 07, 08, 10.
+
+Readback-log adjacency gives the wrong answer (case_03) and is not used.
+
+**Candidate generation (not proof):**
 
 ```text
 workflow_candidates(case):
-  W = activities where source_system == "deletion_worker"
-        and requested_at <= event_time <= reported_at + 3h
-        and event_type in {DELETE_RECORD, REDACT_RECORD, ANONYMIZE_RECORD,
-                           DISABLE_DATA_FLOW, BLOCK_RESTORE, CHECK_DATA_FLOW, CHECK_RESTORE_ACCESS}
-  drop resources with any grounded link (to anyone)       # they are decided by C.5
+  W = activities with source_system == "deletion_worker"
+        and case.requested_at <= event_time <= case.reported_at + WINDOW   # WINDOW = 3h, a heuristic
+        and event_time <= case.audit_at
+        and event_type in {DELETE_RECORD, REDACT_RECORD, ANONYMIZE_RECORD, DISABLE_DATA_FLOW,
+                           BLOCK_RESTORE, CHECK_DATA_FLOW, CHECK_RESTORE_ACCESS}
+  drop resources that have any STRONG/MEDIUM link to anyone       # decided by C.5
   return W
-global_assignment(all cases):
-  for each candidate resource r: claimants = cases whose W contains r
-  if len(claimants) == 1: assign WORKFLOW link to that case
-  else: record AMBIGUOUS(r, claimants); assign to none        # conservative default
+
+global_candidates(all cases):                         # computed over all 550 inputs (sample + eval)
+  for r in union(W): claimants[r] = cases whose W contains r
+  unique[r] = claimants[r][0] if len(claimants[r]) == 1 else None
 ```
 
-- Flag `workflow_link_mode` ∈ {`off`, `unique_only` (default), `offset_signature`}.
-  - `offset_signature` additionally requires the action to match the characteristic offset from `reported_at` observed in samples (e.g. ANONYMIZE ≈ −29 min). It is evaluated on samples but **must be justified before being enabled** because it encodes generator timing rather than identity.
-- Ambiguity is known to occur [FACT]: case_03 and evaluation case_44 share `reported_at` and both have an ANONYMIZE at −29 min, 15 s apart. Sample windows contain 1–46 foreign worker actions.
-- Effect of omission: a COMPLETE case loses one verification step (status unchanged). An INCOMPLETE case cannot gain a finding from a WORKFLOW link anyway (C.7).
+- `workflow_link_mode = unique_only`: the default and the only mode enabled. A uniquely claimed resource becomes a `WORKFLOW_CANDIDATE` of that case. It is **never** a link, never proof of ownership, and never the basis of a finding.
+- `offset_signature`: disabled. It encodes timing patterns that may come from data generation rather than identity. It may be measured in evaluation only.
+- The window and the event-type set are heuristics, labelled as such in the code and reports.
 
-### C.7 Admissibility and cutoff [PROPOSAL]
+**Effect on completeness.** This addresses the risk that a missing link silently drops a required resource.
 
-Capture time and observation time are kept distinct:
+- Before any COMPLETE decision, M7 checks **unresolved required resources** for the case:
+  - **(a) Primary account not established by a C.5 link.** The account is required (A.4.5), and if its only basis is a `WORKFLOW_CANDIDATE`, it is unresolved and the gate fails: the case is held with `REQUIRED_RESOURCE_UNRESOLVED`.
+  - **(b) Workflow candidates with a proven violating state.** A candidate whose admissible evidence shows a violation could be the subject's prohibited data. The case cannot be COMPLETE and is held.
+  - **(c) Workflow candidates with compliant or unknown state.** These do not block, because no evidence ties them to the subject. They are listed in the case's unresolved-scope report.
+- Whether a compliant workflow candidate may appear as a **verification step** is an identity claim. It is decision **Q-WEAK-VERIFY**. Default: not emitted.
+- **Impact on samples** (to be measured, not assumed):
+  - Rule (a) holds the six handcrafted-style sample cases whose primary account has no C.5 link: case_01, 02, 04, 07, 08, 10.
+  - The Q-WEAK-VERIFY default omits the anonymised-analytics verification step in case_03, 21, 25–28.
+
+  These are expected public-sample losses of the conservative default. They are reported, and resolving them requires a user decision, not a silent heuristic.
+
+### C.7 Admissibility and cutoff (corrected)
+
+The earlier pseudocode contained a precedence bug: Python's `and` binds tighter than `or`. A trailing `… or obs.observed_at <= audit_at` could therefore return True for a file captured **after** the cutoff. The functions are rewritten with explicit branches:
+
+```python
+def time_of(obs) -> datetime:
+    """Observation time used for cutoff checks: inner time if present, else file capture."""
+    return obs.observed_at if obs.observed_at is not None else obs.file_captured_at
+
+def admissible_for_state(obs, audit_at) -> bool:
+    if obs.file_captured_at is None:                 # manifest guarantees presence; defensive
+        return False
+    if obs.file_captured_at > audit_at:              # post-cutoff file: never proves state
+        return False
+    if "observed_after_capture" in obs.anomalies:    # inner time later than its own file capture
+        return False                                 # provenance inconsistent -> not state proof
+    if time_of(obs) > audit_at:                      # observation itself after cutoff
+        return False
+    return True
+
+def admissible_for_citation(obs, audit_at) -> bool:
+    return admissible_for_state(obs, audit_at)        # identical by design (A.2)
+
+def admissible_for_link(obs, audit_at, late_inner_linking: bool) -> bool:
+    if admissible_for_state(obs, audit_at):
+        return True
+    if not late_inner_linking:
+        return False
+    if obs.observed_at is None:                      # no inner time -> cannot pre-date the cutoff
+        return False
+    if obs.observed_at > audit_at:
+        return False
+    if "observed_after_capture" in obs.anomalies:
+        return False
+    return obs.file_captured_at > audit_at           # late file, inner time <= cutoff: link only
+```
+
+Activities are admissible as claims only if `event_time <= audit_at`. Activity times are never used as `observed_at` of an observation.
+
+**Enforcement of "link-only".** This is the LATE_INNER_LINKING policy: a late-captured file may help identify a resource, but must never prove its state.
+
+1. `EvidenceRef.admissible` (B.4.1) is computed once per case from these functions.
+2. M6 builds conclusions only from refs with `"state"` in `admissible`.
+3. M8 picks citations only from refs with `"citation"`.
+4. Validator L3 independently re-checks `file_captured_at <= audit_at` for every cited ID.
+5. A test asserts that no `Conclusion.evidence` with role `PROOF` has `"state"` missing from `admissible`.
+
+`late_inner_linking` stays a flag. Its default is decided under Q-LATE-LINK (A.8).
+
+**Tests (`test_admissibility.py`)**, each against all three functions:
+
+| # | Fixture | state | citation | link (flag off / on) |
+|---|---|---|---|---|
+| 1 | capture < audit, inner < audit | ✔ | ✔ | ✔ / ✔ |
+| 2 | capture == audit (boundary), inner == audit | ✔ | ✔ | ✔ / ✔ |
+| 3 | capture < audit, inner > audit | ✘ | ✘ | ✘ / ✘ |
+| 4 | capture > audit, inner < audit (evidence_06 pattern) | ✘ | ✘ | ✘ / ✔ |
+| 5 | capture > audit, inner > audit | ✘ | ✘ | ✘ / ✘ |
+| 6 | capture > audit, inner missing | ✘ | ✘ | ✘ / ✘ |
+| 7 | capture < audit, inner missing (time = capture) | ✔ | ✔ | ✔ / ✔ |
+| 8 | anomaly: inner > capture, both < audit (evidence_13/36 pattern) | ✘ | ✘ | ✘ / ✘ |
+| 9 | anomaly: inner > capture, capture < audit < inner | ✘ | ✘ | ✘ / ✘ |
+| 10 | capture 1 s after audit | ✘ | ✘ | ✘ / depends on inner |
+
+### C.8 Absence by omission (coverage-first, deterministic)
+
+#### C.8.1 Coverage units
+
+A **coverage unit** is `(file_id, system_id, collection, copy_location, level, observed_at)`. It is declared only by:
+
+| Level | Source [FACT] | Unit |
+|---|---|---|
+| `COLLECTION` | Bundle snapshot entry `{data_store, collection, records[]}`, including explicit empty lists | `(data_store, collection, "primary")` at snapshot `captured_at` |
+| `COLLECTION` | Direct SQL table named for its collection and copy: `customer_profiles_primary`, `customer_profiles_failover_replica`, `search_documents_primary` | `(system, collection, copy)` from the table name |
+| `SYSTEM` | Inventory `snapshot_scope.origin_system` | `(system, inventory table mapped to that system, "primary")` |
+| none | Topology extracts, service exports, ledgers, logs, PDFs, PNGs | No coverage. They can show presence or explicit negatives, but never omission. |
+
+Coverage rules:
+
+- A unit covers only its own `(system, collection, copy)`.
+  - A `customer_search_documents` snapshot says nothing about `customer_profiles`.
+  - A primary unit says nothing about a replica.
+- Units from files whose `ExtractionReport` status is not `OK` are discarded (B.3.2).
+
+#### C.8.2 Selection and decision algorithm
 
 ```text
-admissible_for_state(obs, audit_at):
-  return obs.file_captured_at <= audit_at
-     and (obs.observed_at or obs.file_captured_at) <= audit_at
-     and "observed_after_capture" not in obs.anomalies or obs.observed_at <= audit_at
+existence_by_omission(R, case):
+  units = [u for u in coverage_units
+           if u.system == R.system and u.collection == R.collection
+           and admissible_for_state(u.as_observation, case.audit_at)]
+  if not units: return UNKNOWN("NONQUALIFYING_OMISSION")
 
-admissible_for_citation(obs, audit_at) = admissible_for_state(obs, audit_at)
-
-admissible_for_link(obs, audit_at):          # identity/scope only, never state or citation
-  if admissible_for_state(obs, audit_at): return True
-  if LATE_INNER_LINKING and obs.file_captured_at > audit_at \
-     and obs.observed_at is not None and obs.observed_at <= audit_at:
-       return True        # e.g. evidence_06 lines 09-16 08:52 for audit 09-16 09:00
-  return False
+  # 1) coverage first: prefer COLLECTION-level over SYSTEM-level
+  best_level = "COLLECTION" if any(u.level == "COLLECTION" for u in units) else "SYSTEM"
+  cand = [u for u in units if u.level == best_level]
+  # 2) then recency, with deterministic tie-breaks
+  S = max(cand, key=lambda u: (u.observed_at, u.file_captured_at, u.file_id))
+  if R in S.records: return PRESENT(S)            # not an omission
+  # 3) replica-aware: S proves absence only for the copies it covers
+  absent_copies = {u.copy for u in units_of_same_file(S) if R not in u.records}
+  for copy in known_copies(R.collection):         # copies seen in ANY admissible observation of this collection
+      latest = latest_admissible_observation(R, copy, case.audit_at)
+      if latest and latest.time > S.observed_at and latest.shows_present: return PRESENT(latest)
+      if copy not in absent_copies and latest and latest.shows_present:  return PRESENT(latest)
+  # 4) any later positive observation of R anywhere overrides
+  if exists admissible positive observation of R with time > S.observed_at: return PRESENT(that)
+  return ABSENT(S, covered_copies=absent_copies)
 ```
 
-- **An event or inner timestamp is never turned into proof of state.** A late-captured file may at most establish *that a resource belongs to the subject* (flag `LATE_INNER_LINKING`, default to be decided after evaluation; see I).
-- Post-cutoff evidence is excluded from state and citation unconditionally.
-- **Anomaly** [FACT]: `evidence_13` (captured 08-12) holds a record `recorded_at` 08-14 saying `account_1417 FOUND`, after an earlier NOT_FOUND line in the same file. `evidence_36` has the same pattern. Such observations get `anomalies=("observed_after_capture",)` and are only admissible when their own `observed_at <= audit_at`.
-- **Activities** are admissible as claims only if `event_time <= audit_at`. They never prove state.
+- **Coverage before recency.** Recency decides only among snapshots of the best available coverage level. The latest snapshot does not win if its coverage is weaker.
+- **Replica-aware.** A primary-only absence never overrides a replica copy observed present at or after the snapshot. It also never overrides a replica present earlier with no later replica coverage. [FACT] case_05: present in the failover replica, absent in the primary. case_16: present only in the read replica.
+- **Explicit negatives take precedence.** A named negative (`404`, `rows=0`, `NOT_FOUND`) later than S is used as the proof instead (A.4.2a). An omission is used only when no later explicit evidence exists.
 
-### C.8 Absence by omission [PROPOSAL + UNRESOLVED]
+**Testing against known cases** (the samples are a test oracle, not a rule source). Measured with a read-only probe on the four sample cases whose expected proof is an omission snapshot:
 
-A resource is **ABSENT-by-omission** in snapshot S when:
+| Case | Expected citation | Latest qualifying unit of any level | Coverage-first rule |
+|---|---|---|---|
+| case_01 | evidence_54 | evidence_54 | evidence_54 |
+| case_02 | evidence_54 | evidence_54 | evidence_54 |
+| case_04 | evidence_54 | **evidence_90** (inventory, system-level) | evidence_54 |
+| case_31 | evidence_51 | evidence_51 | evidence_51 |
 
-- (a) S is admissible for state;
-- (b) S declares coverage of the resource's system/collection: inventory `snapshot_scope.origin_system`, a bundle snapshot with matching `data_store/collection`, or a direct table such as `customer_profiles_primary`;
-- (c) the resource does not appear in that coverage;
-- (d) no admissible positive observation of the resource is later than S.
+- [FACT for the probe] Coverage-first matches 4/4. Latest-of-any-level matches 3/4.
+- [ASSUMPTION] Ranking collection-level above system-level is justified independently of the samples: a system-level scope does not state which collections or copies were captured in full.
+- It remains a hypothesis to re-test at Stage 9. If later evidence contradicts it, the rule is revised in `config.py` (one place), not patched per case.
 
-**Replica-aware rule:** when S contains several copies (primary and replica tables), absence requires absence in **every** copy table in S. Presence in any copy means PRESENT [FACT: case_05 failover replica, case_16 read replica].
+### C.9 Alignment with other sections
 
-**[UNRESOLVED]** Which omission snapshot is cited (evidence_54 vs the later evidence_90 for case_04). Default: the latest qualifying snapshot. A variant that prefers snapshots with a populated table of the same collection is evaluated on samples.
+- **B.4.1 `EvidenceRef.admissible`** must be computed with the C.7 functions above.
+- **E pseudocode** must use:
+  - the C.5.3 rules (I1–I5, E1–E3);
+  - C.6 unresolved-required-resource checks (a)/(b);
+  - C.8.2 for existence.
+- **F.2** citation for omission = `S.file_id` from C.8.2.
+- **G** gains:
+  - `test_provenance.py` (C.2) and `test_admissibility.py` (C.7);
+  - relationship-type tests (C.5.2), including `QUERY_KEY_ONLY` and trace-key override;
+  - coverage-unit tests (C.8.1);
+  - the C.8.2 four-case oracle.
+- **I/A.8** gain **Q-WEAK-VERIFY** and the conservative-default sample impact (C.6).
 
 ---
 

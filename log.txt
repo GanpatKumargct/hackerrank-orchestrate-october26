@@ -589,3 +589,80 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T00:02:49Z] Revise IMPLEMENTATION_PLAN Section C per review fixes
+
+User Prompt (verbatim, secrets redacted):
+Section C — Evidence and Identity Resolution
+
+C.2
+
+Problem: Preserving metadata alone does not guarantee correct decisions. Every downstream module must respect it, especially when determining admissibility and choosing citations.
+fix: Keep this design, and test that normalization never discards provenance or changes the original timestamps.
+
+C.3
+Problems:
+1. Phone normalization may be too aggressive. Removing everything except + and digits doesn't necessarily make differently formatted phone numbers equivalent across country codes or numbering conventions.
+2. Hash generation needs a precise contract. The plan says sha256(lower(email)) matches all 850 current users. That supports the current dataset, but historical hashes should also be checked against the actual historical identifier records where possible.
+3. Free-text matching requires care. A regex can find an identifier without proving that the surrounding record belongs to that user.
+fix: Define normalization separately from identity-link confidence. A normalized match is a candidate link, not automatically proof of ownership.
+
+c.4
+Problems:
+- The plan says historical identifiers are searched at all times because old systems may retain them. But this could create false links if identifiers have been reassigned or reused.
+- The validity windows are retained “for explain only.” That means they do not currently affect matching decisions.
+- The unresolved-subject path needs an explicit rule for what the final output should contain.
+ fix: Distinguish between an identifier's historical association and proof that a particular resource belongs to the subject. Preserve time windows and flag ambiguity instead of silently accepting every historical match.
+
+C.5
+Problems:
+- A foreign key might point to a shared or indirect resource rather than establish ownership.
+- A resource linked to another subject at one time may have changed ownership later.
+- The rule that a grounded link to another subject excludes a resource needs to handle conflicting or time-dependent links.
+ fix: Every link should retain its source, timestamp, relationship type and confidence. Conflicts should be recorded, and exclusion should require a clearly defined rule rather than a blanket assumption.
+
+C.6
+Problems:
+1. The time window — from requested_at through three hours after reported_at — is a proposed heuristic, not definitive proof of ownership.
+2. The optional offset_signature mode uses characteristic timing patterns. The plan itself warns that these may reflect synthetic data-generation behavior rather than real identity.
+3. The plan says omitting such a link can remove a verification step from a COMPLETE case. That creates a risk of incomplete verification if the missing resource is required.
+fix: Keep unique_only as a conservative candidate-generation method, not as automatic proof. Before a case can be marked complete, check whether any required resources remain unresolved.
+
+c.7
+A concrete bug in the proposed pseudocode
+
+code--------
+
+Python evaluates and before or. As a result, the final condition can make the function return True even when the earlier checks fail.
+
+For example, a file captured after the audit cutoff could be accepted if its inner timestamp is before the cutoff.
+
+fix: Rewrite the function using explicit branches and parentheses, with separate tests for normal observations, post-cutoff files, missing timestamps and anomalous inner timestamps.
+
+There is also a policy decision: a late-captured file may be allowed to help identify a resource through LATE_INNER_LINKING, but it must never prove the resource's state at the cutoff.
+
+That distinction must remain enforced throughout the pipeline.
+
+c.8
+Problems:
+- The definition of snapshot coverage needs to be precise. A snapshot of one collection cannot establish absence from a different collection.
+- The latest snapshot isn't necessarily the best snapshot if its coverage is incomplete.
+- The plan's proposed default is to cite the latest qualifying snapshot, but it leaves an alternative snapshot-selection rule unresolved.
+- A snapshot may show absence in a primary store while a replica still contains the record.
+fix: Select snapshots based on verified coverage and admissibility first, then apply the replica-aware rule. Keep snapshot selection deterministic and test the result against known cases.
+
+Agent Response Summary:
+Ran read-only fact checks: historical email/hash pairs 107/107 consistent, 0 identifiers shared across users, phones all +country-code with 0 canonical collisions and no evidence format mismatches, 0 resources co-occurring with >1 subject, source_resource_id is the only FK (3 rows), topology extracts never hold customer_profiles in primary tables and always hold exactly 10 audit events (curated, not full coverage), and a coverage-first snapshot rule matched 4/4 omission sample citations vs 3/4 for latest-any. Rewrote only Section C of docs/IMPLEMENTATION_PLAN.md: provenance contract with tests, normalisation separated from link confidence, strict phone canonicalisation, hash contract for current and historical values, association windows used in matching with reuse ambiguity handling, explicit unresolved/ambiguous subject output path, Link object with relationship types and confidence plus deterministic inclusion/exclusion/conflict rules, workflow candidates as non-proof with required-resource checks before COMPLETE and Q-WEAK-VERIFY, corrected admissibility functions with explicit branches and a 10-row test table, and coverage-unit based omission selection with replica awareness. Sections A, B and D-J untouched.
+
+Actions:
+* Edited docs/IMPLEMENTATION_PLAN.md (Section C replaced; other sections byte-identical)
+* Ran read-only scratchpad Python checks over dataset CSVs, evidence index and SQL/JSON snapshot structures
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
