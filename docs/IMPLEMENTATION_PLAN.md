@@ -1039,6 +1039,28 @@ resolve(request_email):
 
 `case_33` and `case_52` share an email, and are evaluated independently at their own cutoffs [FACT].
 
+#### C.4.1 Stage 5 implementation notes (`code/audit/identity.py`)
+
+- **Association timelines.** For each user and field (`email`, `email_hash`, `phone`), the first audit row's `old_value` runs from an unknown start to the first change, and each `new_value` runs to the next change. The last value equals the snapshot; the loader enforces this. Each association records its source `audit_id`, or `snapshot`. `user_id` is an open-ended association.
+- **Cutoff (`as_of`).** An association whose window starts after `as_of` is treated as not known at `as_of`. It is excluded from the subject's identifiers and from `owners_of`. [FACT] No request's user has an identity change after its `audit_at`, so this does not change current results. It is tested with synthetic data.
+- **Computed hashes.** These are added only for emails whose recorded email/hash pairing verified (C.3). An unverified pair keeps the recorded hash with `hash_verified=False`, and no hash is computed for it.
+- **Attribution.** Statuses are `ATTRIBUTED`, `AMBIGUOUS_IDENTIFIER` (reuse with no single containing window), `UNKNOWN_IDENTIFIER` (no user ever held it) and `UNMATCHABLE` (no canonical form). Notes: `HISTORICAL_VALUE_AFTER_CHANGE`, `PRE_ASSOCIATION_HIT`. Attribution says whose identifier a hit is. It does **not** decide record ownership or scope (C.5, Stage 6).
+- **Explicit identity claims.** `LINK_RESOURCE_IDENTITY` details are parsed with the two exact templates observed. Each claim gets a status:
+  - `CONSISTENT`: email owner equals the claimed user;
+  - `CONFLICTING`: different owner, or the parsed resource differs from the activity's resource;
+  - `UNKNOWN_EMAIL`;
+  - `UNKNOWN_USER`.
+
+  Unparsed details are listed, never guessed. Claims after `as_of` are excluded. Claims stay CLAIMs (C.5.2).
+- **Conflict detection.** A record whose own identifiers attribute to more than one user is reported as an identity conflict. This is the input to C.5.3 I3/I4.
+- **Not used as identity:** `reporter_service`, manifest `origin`, resource prefixes, trace/query keys on their own, and timing.
+- [FACT, Stage 5 run]
+  - All 550 request emails resolve: 447 current, 103 historical. 0 unresolved, 0 ambiguous.
+  - All 12 catalog claims are `CONSISTENT`.
+  - Identifier hits: 2,278 `ATTRIBUTED` (229 with `HISTORICAL_VALUE_AFTER_CHANGE`) and 38 `UNKNOWN_IDENTIFIER`. The unknown hits are decoys, for example 18 `.jr` look-alikes and evidence_54 users absent from the identity table.
+  - 0 record-level identity conflicts.
+  - Known gap: the `marketing_001` claim-vs-screenshot conflict noted in C.5.3 I5 cannot be checked while PNGs are an `EVIDENCE_GAP`.
+
 ### C.5 Linking records to the subject
 
 #### C.5.1 Link object
@@ -2550,7 +2572,7 @@ Each stage is small enough to inspect and test on its own. A stage starts only w
 | 2 | SQL + JSON parsers → `Observation`s, coverage units, inner times, anomaly flags, nested hits, `FileExtraction` | 1 | All 24 SQL and 28 JSON files parse with a status and counts. SQL header vs manifest checked. The evidence_13/36 anomalies are flagged. Provenance tests pass. |
 | 3 | Log + TXT parsers (4 line formats + pipe), trace grouping, trace keys, identifier extraction (C.3) | 2 | All 26 logs and the TXT parse. Any non-OK status is explained. Started-line keys are attached as `TRACE_KEY`. Free-text identifiers are found. Normalisation keeps raw values. |
 | 4 | Stdlib PDF extractor (B.1.2) with page-level provenance; local media-cache reader with SHA/prompt/schema verification (B.1.3, no external calls); `ObservationIndex`; owner resolution (F.1.3, Q-OWNER-RESOLUTION) | 3 | 4 PDFs OK. 11 PNGs reported as `EVIDENCE_GAP` until an authorized cache exists. Index lookups deterministic, with no merging of observations. Owner-resolution tests pass. |
-| 5 | M3 identity + associations (C.4) | 1 | 518/518 and 32/32 resolution reported as data metrics; reuse/ambiguity fixtures |
+| 5 | M3 identity + associations (C.4, C.4.1): timelines, `as_of` cutoff, attribution, catalog-claim parsing, record-level conflicts | 1, 4 | 518/518 and 32/32 resolution reported as data metrics; reuse/ambiguity, cutoff, unverified-hash, catalog-status and conflict fixtures pass |
 | 6 | M5 links, scope rules I1–I5/E1–E3, admissibility (C.7), workflow candidates (C.6), episode (`prior_request`) | 4, 5 | C.7 ten-row table tests; every included/excluded resource has a reason code |
 | 7 | M4 classification (D.1), conditions (D.2), dimensions and verdicts (B.4, D.3, single-observation proof), omission (C.8), conflicts (E.3.1) | 6 | Unit tests for D.1–D.3, C.8 and E.3.1; Q-D-ASSUMPTIONS edge tests |
 | 8 | Intent (E.1), sets and gate (E.4–E.5) | 7 | G.1.1 gate tests D-1…D-13; E.1.3 intent tests |
