@@ -2,12 +2,18 @@
 
 Stages 0–8: `python code/main.py inspect` validates the inputs, parses all
 evidence, and prints identity, scope, resource-state and case-decision summaries
-(counts and IDs only, no personal values). Case decisions are computed in memory;
-no output.csv, staging file or held report is written (Stage 9).
+(counts and IDs only, no personal values). Case decisions are computed in memory.
+
+Stage 9: `python code/main.py stage [--run-dir runs/<ts>]` runs the evaluation
+requests, validates them (L1–L4, D.4) and writes only under runs/: a staging file
+(explicitly `.partial` while cases are held), held_report.md, held_cases.json,
+validation_report.md and run_summary.json. The root output.csv is never written;
+the exit code is non-zero while cases are held or validation fails.
 """
 import argparse
 import sys
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -17,6 +23,7 @@ from audit.errors import ReportNote, SchemaError, ScopeCode  # noqa: E402
 from audit.scope import ScopeBuilder              # noqa: E402
 from audit.state import assess                    # noqa: E402
 from audit.decision import HOLD, CaseAnalyzer     # noqa: E402
+from audit.serializer import RunContext, stage_run  # noqa: E402
 from audit.evidence.extract import build_index    # noqa: E402
 from audit.identity import IdentityResolver, Subject  # noqa: E402
 from audit.loader import load_dataset             # noqa: E402
@@ -160,12 +167,39 @@ def cmd_inspect(args):
     return 0
 
 
+def cmd_stage(args):
+    try:
+        ds = load_dataset(args.dataset)
+    except SchemaError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    index = build_index(ds)
+    resolver = IdentityResolver(ds)
+    analyzer = CaseAnalyzer(ds, index, resolver, ScopeBuilder(ds, index, resolver))
+    requests = sorted(ds.requests, key=lambda r: config.ROW_SORT_KEY(r["case_id"]))
+    results = [analyzer.analyze(r) for r in requests]
+    ctx = RunContext(index, analyzer.capture, ds.activities, index.gaps())
+    run_dir = Path(args.run_dir) if args.run_dir else         config.RUNS_DIR / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    code, summary = stage_run(results, {r["case_id"] for r in requests}, ctx, run_dir)
+    print(f"run directory: {run_dir}")
+    for k in ("inputs", "emitted", "held", "held_by_reason", "staging_file", "staging_rows", "partial",
+              "run_level_checks", "staging_sha256"):
+        print(f"{k}: {summary[k]}")
+    print(f"file errors: {len(summary['file_errors'])}  run errors: {len(summary['run_errors'])}  "
+          f"cases failing validation: {len(summary['cases_failing_validation'])}  "
+          f"dependency-order conflicts: {sum(len(v) for v in summary['dependency_order_conflicts'].values())}")
+    print(f"status: {summary['status']}")
+    print(f"exit code: {code}")
+    return code
+
+
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Ghost Data Still Exists — deletion audit (Stages 0–8, inspect only)")
-    parser.add_argument("command", choices=["inspect"])
+    parser = argparse.ArgumentParser(description="Ghost Data Still Exists — deletion audit (Stages 0–9: inspect, staging run)")
+    parser.add_argument("command", choices=["inspect", "stage"])
     parser.add_argument("--dataset", default=str(config.DATASET_DIR))
+    parser.add_argument("--run-dir", default=None, help="stage only: directory under runs/ (default runs/<UTC ts>)")
     args = parser.parse_args(argv)
-    return cmd_inspect(args)
+    return cmd_stage(args) if args.command == "stage" else cmd_inspect(args)
 
 
 if __name__ == "__main__":

@@ -50,6 +50,8 @@ class CaseResult:
     sets: object = None
     assessments: dict = field(default_factory=dict)
     notes: tuple = ()
+    scope: object = None                              # CaseScope (L3/L4 run-level validation, Stage 9)
+    audit_at: object = None
 
 
 # --------------------------------------------------------------------------- #
@@ -254,9 +256,10 @@ class CaseAnalyzer:
 
     def analyze(self, req):
         intent = classify_intent(req["request_text"])
-        base = dict(case_id=req["case_id"], source=req["_source"], intent=intent)
+        base = dict(case_id=req["case_id"], source=req["_source"], intent=intent, audit_at=req["_audit_at"])
         try:
             scope = self.builder.build(req)
+            base["scope"] = scope
             if not isinstance(scope.subject, Subject):                  # E.2.1
                 if intent.value == NON_DELETION:
                     return CaseResult(outcome=EMIT, status="NOT_APPLICABLE", **base)

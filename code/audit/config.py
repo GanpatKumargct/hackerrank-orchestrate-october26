@@ -195,6 +195,19 @@ WORKFLOW_OP_CATEGORY_ACTION = {"DELETE_RECORD": "DELETE", "REDACT_RECORD": "REDA
                                "ANONYMIZE_RECORD": "ANONYMIZE", "DISABLE_DATA_FLOW": "DISABLE",
                                "BLOCK_RESTORE": "RETAIN_BLOCK_RESTORE"}
 
+# D.4.1 RECREATES edges: connector -> target system. Q-D-ASSUMPTIONS (e) [ASSUMPTION].
+# Exact values only; an unmapped connector creates no edge (edges affect ordering
+# validation only, never scope or state).
+CONNECTOR_TARGETS = {
+    "analytics_identity_bridge": "analytics_platform",
+    "support_profile_sync": "support_platform",
+    "search_profile_indexer": "search_service",
+}
+DESTINATION_TARGETS = {"customer_analytics_warehouse": "analytics_platform"}
+
+# Run exit codes (F.3.2). Root output.csv is never written by the Stage 9 staging run.
+EXIT_OK, EXIT_HELD, EXIT_INVALID = 0, 3, 4
+
 # Collections that hold each category (used for omission coverage, C.8).
 CATEGORY_COLLECTIONS = {
     "USER_PROFILE": ("customer_profiles",),

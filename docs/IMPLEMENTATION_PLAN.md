@@ -2432,6 +2432,32 @@ The three-status vs held conflict and the 518-row conflict are handled by the F.
 
 [FACT] For `VERIFY_RECORD_PRESENT`, 6 of the 7 audit records cited in COMPLETE samples carry `retention_until` in the cited file. `audit_record_6909` (case_31) has none in any participant file, so under Q3 that case is held.
 
+### F.7 Stage 9 implementation notes (`code/audit/serializer.py`, `code/audit/dependencies.py`)
+
+- **Command.** `python code/main.py stage [--run-dir PATH]` processes the 518 evaluation requests. It writes **only** to `runs/<UTC yyyymmddThhmmssZ>/` (or the given directory; the repository root is refused). The root `output.csv` is never written by Stage 9. Promotion to the root file is left to the Stage 13 final run.
+- **Run directory contents.**
+  - `staging_output.partial.csv` when any case is held or the row count is not 518; `staging_output.csv` only when every case is emitted and valid. It contains emitted rows only, in `ROW_SORT_KEY` order, with nothing padded or fabricated.
+  - `held_report.md` and `held_cases.json`: each held case with its reasons, the unresolved members (`resource_id`, reason codes, category, owner system) and the set sizes. They contain identifiers and codes only, no personal values.
+  - `validation_report.md` and `run_summary.json`.
+- **Validation.**
+  - Per emitted case: the per-case schema check (L1.5–L1.8, L2) plus **L3** (F.2.1 checks 1–6) and **L4** (L4.1–L4.7). A case that fails is **demoted to held `VALIDATION_FAILED`**, reported with its errors, and never staged.
+  - File level: the staging file is re-read from text alone (L1/L2, including numeric sort, duplicates and unexpected IDs), and every staged row is round-trip compared with its result.
+  - Run level: duplicate, missing or unexpected results; held count = 0; emitted + held = inputs; evidence gaps accepted.
+- **Exit codes** (`config`): `EXIT_OK=0` (complete and valid; still no root write in this stage), `EXIT_HELD=3` (held cases remain), `EXIT_INVALID=4` (any validation, coverage or round-trip error).
+- **D.4 edges** (validation only; never scope, state or step content):
+  - `DERIVED_FROM` from `source_resource_id`;
+  - `RECREATES` from an admissible connector observation whose `connector_name` / `destination` maps to a target system (Q-D-ASSUMPTIONS (e), `config.CONNECTOR_TARGETS` / `DESTINATION_TARGETS`, exact values only);
+  - `RESTORES` from admissible `RESTORE_BACKUP` claims naming the downstream resource in `details`;
+  - `REPLICATES` from admissible `SYNC_RECORD` claims. These name only the source **system**, so the edge is system-level: from that system's in-scope resources to the claimed resource.
+  - Both ends must be in the case scope. D1 violations are L4 errors; D2 conflicts are reported as `DEPENDENCY_ORDER_CONFLICT` and the contract order is kept (Q-DEP).
+- **Run facts [FACT, Stage 9 staging run `runs/20261025T024207Z`].**
+  - 518 inputs: emitted COMPLETE 34, INCOMPLETE 10, NOT_APPLICABLE 10; held 464 (VERIFICATION_SET_INCOMPLETE 327, REQUIRED_RESOURCE_UNRESOLVED 137).
+  - The staging file is partial with 54 rows. File errors 0, run errors 0, cases failing L1–L4 0, dependency-order conflicts 0.
+  - Edges found across all 550 inputs (evaluation + samples): RECREATES 34, DERIVED_FROM 1. In emitted cases, one RECREATES edge has both ends remediated, and D1 holds.
+  - Run-level checks: held = 0 FAIL; emitted + held = inputs PASS; evidence gaps accepted FAIL (11 PNG gaps).
+  - Exit code 3. The staging sha256 matched an earlier identical run (deterministic).
+- **`.gitignore` (pending approval).** No `.gitignore` exists in the repository. Run artifacts contain dataset identifiers (A.7.3) and must not be committed or packaged. Proposed rule: a new root `.gitignore` containing `/runs/`. It has not been created.
+
 ---
 
 ## G. Testing and evaluation
@@ -2691,7 +2717,7 @@ Each stage is small enough to inspect and test on its own. A stage starts only w
 | 6 | M5 links, scope rules I1–I5/E1–E3, admissibility (C.7), workflow candidates (C.6), episode (`prior_request`) — see C.5.4 | 4, 5 | C.7 ten-row table tests; every included/excluded resource has a reason code; trace-key flag on/off, late-link, cutoff, anomaly, catalog, shared/ownership-changed, episode and workflow fixtures pass |
 | 7 | M4 classification (D.1), conditions (D.2), dimensions and verdicts (B.4, D.3, single-observation proof), omission (C.8), conflicts (E.3.1) — see D.7 | 6 | Unit tests for D.1–D.3, C.8 and E.3.1; Q-D-ASSUMPTIONS edge tests; copy-scope and subject-scoped coverage tests |
 | 8 | Intent (E.1), sets and gate (E.4–E.5), and — per the Stage 8 instruction — step construction, citations and system resolution (F.1–F.2) with a per-case schema check (F.4 L1.5–L1.8, L2); in memory only — see E.9 | 7 | G.1.1 gate tests D-1…D-13; E.1.3 intent tests; step order/numbering/citation and validator negative fixtures |
-| 9 | Serializer, run-level validator (L1 file checks, L3 citation meaning, L4 policy completeness incl. D.4 dependency edges), all-or-nothing writer, held report (F.3–F.4) | 8 | F/G.1 tests; integration I-1…I-5 |
+| 9 | Serializer, run-level validator (L1 file checks, L3 citation meaning, L4 policy completeness incl. D.4 dependency edges), staged writer under `runs/` (no root output), held report (F.3–F.4) — see F.7 | 8 | F/G.1 tests; partial-staging, held-report, duplicate/missing-case, file-schema, dependency and non-zero-exit tests |
 | 10 | Evaluator and metrics (G.3), custom cases CC1–CC5 (G.5), edge cases (G.4) | 9 | Metrics computed from an actual run; false-COMPLETE = 0; invalid citations = 0 |
 | 11 | **First complete analysis run** on real data | 10 | Staging file and held report produced; **no root `output.csv`**. Held count, case IDs, reasons and evidence gaps reported to the user (Q1). |
 | 12 | Media extraction (B.1.3) | 11 + X-MEDIA-TRANSMISSION | Only after explicit approval and a confirmed model; cache hash-verified; affected cases re-run |
