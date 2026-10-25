@@ -970,3 +970,68 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T00:34:26Z] Revise IMPLEMENTATION_PLAN Section F (output generation)
+
+User Prompt (verbatim, secrets redacted):
+Section F — Output Generation (M8/M9)
+
+F.1 — Step generation
+1. Remove any rule that silently omits a required resource's verification step while still allowing the case to remain `COMPLETE`.
+2. Require admissible, resource-specific proof of the compliant final state for every required resource before emitting `COMPLETE`.
+3. Separate action dependency/execution order from deterministic output sorting.
+4. Define how unresolved resources affect the case decision without inventing evidence or findings.
+
+F.2 — Evidence citations
+1. Select citations only from admissible evidence that proves the specific state claimed by the step.
+2. Validate subject identity, resource identity, capture cutoff, and evidence meaning before choosing the latest citation.
+3. Never treat workflow assignments, reported statuses, or activity claims alone as proof of resource state.
+4. Apply Section C.8's coverage requirements to absence-by-omission citations.
+5. Clearly distinguish proposed remediation from remediation that has actually been performed.
+
+F.3 — Serialization and failure handling
+1. Resolve the contradiction between an errored deletion case becoming `INCOMPLETE` and the requirement that `INCOMPLETE` contain a genuine finding.
+2. Do not fabricate findings or citations, and do not map processing errors to `NOT_APPLICABLE`.
+3. Preserve the required 518-row output contract, but fail the overall run with an explicit diagnostic if a case cannot be honestly represented under the permitted schema.
+4. Resolve case sorting using the authoritative challenge specification. Document the decision once and apply it consistently in serialization and validation.
+
+F.4 — Validator
+Ensure the validator enforces both structural and semantic correctness:
+- Exact output header, required row count, unique case IDs, allowed statuses/enums, valid JSON and exact step keys.
+- Consecutive step numbers, deterministic sorting and valid operation/phase/state combinations.
+- Correct evidence IDs, admissible capture times and citations that prove the claimed state for the correct subject and resource.
+- `NOT_APPLICABLE` must have an empty steps array.
+- `COMPLETE` must contain only valid verification steps and must prove every required resource's compliant final state.
+- `INCOMPLETE` must contain genuine findings with matching remediation; do not manufacture findings to satisfy validation.
+- Unknown or unresolved required resources must not be silently omitted from a `COMPLETE` result.
+
+Use the existing scope, admissibility, identity and policy rules as the source of truth for semantic validation.
+
+Cross-section checks
+Before marking Section F complete, list contradictions with Sections A–E and G–I. In particular, reconcile:
+- The three-status output contract versus internal held/undetermined cases.
+- The required 518-row output versus cases that cannot yet be represented honestly.
+- Citation requirements versus the evidence admissibility and cutoff rules.
+- Operation ordering versus action dependencies.
+- Public-sample sorting versus the authoritative output specification.
+
+Do not resolve a cross-section contradiction by silently changing another section. Record the proposed resolution and leave it open for approval where necessary.
+
+Acceptance criteria
+Section F is ready for approval only when its rules cannot produce a false `COMPLETE` result, cannot fabricate findings after processing errors, and define a consistent output and validation contract. Report the exact changes and remaining blockers; do not generate production output as part of this plan-only review.
+
+Agent Response Summary:
+Verified read-only that sample system_ids map one-to-one to resource prefixes while log service fields are often reporters (profile_service with account_* resources, record_lookup reporters carrying a separate system field, support_replica), and that 6 of 7 audit records cited in COMPLETE samples carry retention_until in the cited file but audit_record_6909 (case_31) has no retention field anywhere. Rewrote only Section F: step invariants with no silent omission and no dedupe, proposed-vs-performed rule, system_id resolution precedence with SYSTEM_AMBIGUOUS hold, sort separated from dependency validation, six-check citation filter before latest-selection, single-file proof requirement (CITATION_UNSUPPORTED, Q-SPLIT-PROOF), removal of the conservative-row failure path (errors held, never INCOMPLETE/NOT_APPLICABLE), all-or-nothing writer with staging file, held report and non-zero exit, Q-SORT applied once via ROW_SORT_KEY, L1-L4 plus run-level validator with independence caveat, acceptance-criteria mapping, and a cross-section contradiction table including new open item Q-RETENTION-UNOBSERVED (projected to hold case_31). No production output generated.
+
+Actions:
+* Edited docs/IMPLEMENTATION_PLAN.md (Section F replaced; other sections byte-identical)
+* Ran read-only Python/grep over sample_output.csv and dataset/evidence
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+

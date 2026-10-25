@@ -2033,53 +2033,305 @@ The full plan is **not yet consistent**. These passages conflict with Section E 
 
 ## F. Output generation (M8, M9)
 
-### F.1 Step construction
+Section F turns emitted case decisions into steps and the CSV, and validates them. It consumes **only** `emit(COMPLETE | INCOMPLETE | NOT_APPLICABLE, …)` results from E.4.2. A `hold(…)` result never reaches M8 or M9 (E.4.3).
+
+F adds no evidence rules. It applies those already defined:
+
+- admissibility: C.7;
+- identity and links: C.4–C.5;
+- omission coverage: C.8;
+- categories, treatments and conditions: D;
+- sets and the gate: E.4–E.5;
+- the operation table: A.3.1.
+
+### F.1 Step generation
+
+#### F.1.1 Inputs and invariants
+
+`build_steps(decision)` receives:
+
+- the status;
+- the case sets (`REQ`, `PROVEN_OK`, `VIOLATING`; E.4.1);
+- each resource's `ResourceAssessment` (B.4.2).
+
+It enforces, and raises `StepBuildError` on violation (the case then goes to `hold(VALIDATION_FAILED)`):
+
+1. **No silent omission.**
+   - For COMPLETE: one verification step per member of `REQ`, i.e. `len(verification_steps) == len(REQ)`.
+   - For INCOMPLETE: one finding + one remediation per member of `VIOLATING`, and one verification per member of `REQ`.
+   - There is no "omit and log" path. The earlier F.2 rule "a COMPLETE-case resource with no citable proof is omitted" is **removed**.
+2. **COMPLETE proof.** Every `REQ` member is `COMPLIANT_PROVEN` and has a citation that meets F.2. Otherwise `decide()` would not have emitted COMPLETE. Here it is re-asserted, not re-decided.
+3. **Unresolved resources** cannot appear in an emitted case. E.4.2 holds every case where `UNRESOLVED`, `UNEXPRESSIBLE` or `WF_VIOLATING` is non-empty. F never invents a step, finding or citation for them, and never drops them to make a case emittable.
+4. **No duplicates.** `(operation, system_id, resource_id)` is unique within a case. A duplicate indicates a logic error and is not deduplicated silently.
+
+#### F.1.2 Step content
+
+| Field | Rule |
+|---|---|
+| `operation` | From `TREATMENTS[category]` (A.3.2). Findings use the violation's finding op; remediation and verification use the chain. |
+| `phase`, `state` | Looked up from `OPERATIONS` (A.3.1) by operation. Never set independently. |
+| `resource_id` | The in-scope resource ID exactly as observed in evidence (no normalisation of case or format) |
+| `system_id` | Canonical owning system (F.1.3) |
+| `evidence_id` | F.2. FINDING and COMPLETE verification cite a file; REMEDIATION and INCOMPLETE verification use `""`. |
+| `step_no` | Assigned after sorting (F.1.4) |
+
+**Proposed vs performed.**
+
+- Every REMEDIATION step is a **PROPOSED** future action (E kinds). It is generated only from `VIOLATING`.
+- An activity reporting that remediation already happened (e.g. `DISABLE_DATA_FLOW SUCCESS`, `BLOCK_RESTORE SUCCESS`, `REDACT_RECORD SUCCESS`) is a **CLAIM**:
+  - it never produces a step;
+  - it never removes a needed step;
+  - it never serves as a citation.
+- A performed remediation is recognised only through an OBSERVED compliant state, e.g. `enabled=false` in an admissible observation. That observation, not the activity, is what a COMPLETE verification cites.
+
+#### F.1.3 `system_id` determination
+
+[FACT] In the 32 samples every resource prefix maps to exactly one `system_id`:
+
+| Prefix | `system_id` |
+|---|---|
+| `account` | `account_service` |
+| `analytics` | `analytics_platform` |
+| `backup` | `backup_service` |
+| `export` | `export_service` |
+| `tombstone` | `identity_service` |
+| `data_flow` | `integration_service` |
+| `search` | `search_service` |
+| `audit_record` | `security_service` |
+| `support` | `support_platform` |
+
+[FACT] The log `service=` field is often the **reporting** service, not the owner. Examples:
+
+- `profile_service` appears 300 times with `account_*` resources;
+- `downstream_delivery_service`, `search_index_service` and `readback_collector` emit `record_lookup` lines that carry a separate `system="account_service"` field;
+- `support_replica` reports `support_*` resources.
+
+Precedence, implemented once in `config.SYSTEM_RESOLUTION`:
+
+1. An explicit owner field on the observation: `system`, `data_store`, `origin_system`, or the owning table/collection of a SQL row.
+2. A reporter-service alias map: `profile_service → account_service`, `support_replica → support_platform`, … Each entry is labelled [ASSUMPTION].
+3. Prefix map (above): consistency check only.
+
+| Outcome | Result |
+|---|---|
+| Rule 1 values across admissible observations agree | `system_id` = that value |
+| Rule 1 values disagree | `SYSTEM_AMBIGUOUS` → the case is held (new held reason; F.6) |
+| Rule 1 absent, rule 2 present | `system_id` from the alias, with confidence MEDIUM |
+| Only rule 3 available | `SYSTEM_AMBIGUOUS` → held. A prefix never decides an output field alone, consistent with D.1.1. |
+
+#### F.1.4 Output order vs action dependencies
+
+- **Output order** [REQ: problem_statement "Rules"; README "Output"]: sort by `(OPERATIONS index of operation, system_id, resource_id)` using plain code-point string comparison, then number steps 1..n. This is the only order written to the CSV.
+- **Action dependencies** (D.4) are validated separately on the same step list:
+  - D1 (disable/block before dependent record changes): violation → validator error.
+  - D2 (downstream before source): conflict → `DEPENDENCY_ORDER_CONFLICT` reported. The output order is **not** changed (Q-DEP).
+- The two are never merged. No step is moved to satisfy a dependency, and no dependency is dropped to satisfy the sort.
+
+### F.2 Evidence citations
+
+#### F.2.1 Candidate filter
+
+A citation candidate for step *s* on resource *R* must pass **all** checks below, in this order. The checks reuse the C/D functions; they do not re-implement them.
+
+| # | Check | Source of truth |
+|---|---|---|
+| 1 | The ref is OBSERVED evidence from a manifest file. Activities (`activity_id`), audit-log rows (`audit_id`), reported statuses and workflow assignments are rejected as state proof. | E kinds, B.4.1 `kind` |
+| 2 | `admissible_for_citation(obs, audit_at)`: file `captured_at ≤ audit_at`, observation time ≤ `audit_at`, no `observed_after_capture` anomaly. Late-captured link-only evidence (Q-LATE-LINK) is rejected here. | C.7 |
+| 3 | **Resource identity.** The observation's `resource_id` equals R, **or** the ref is the C.8.2-selected omission snapshot whose coverage unit matches R's `(system, collection)` and every covered copy | C.1, C.8 |
+| 4 | **Subject identity.** R is in scope for this case's subject through a C.5 link (`RECORD_FIELD`, `TRACE_KEY`, `FREE_TEXT_MENTION`, `DERIVED_FROM` or `CATALOG_CLAIM`; not `WORKFLOW_CANDIDATE`). The link may come from a different file than the citation (e.g. an omission snapshot carries no identifier). | C.5, A.8 Q-WEAK-VERIFY |
+| 5 | **Meaning.** The observation, read by the same derivation as M6 (B.4.2, D.3), shows exactly the state the step claims. | B.4.2, D.3 |
+| 6 | The ref is a `PROOF` ref of the verdict that produced the step, not `SUPERSEDED` or `CONTRARY`. | B.4.2 `Verdict.proof` |
+
+What check 5 means for each step type:
+
+| Step | The observation must show |
+|---|---|
+| FINDING `REPORT_REMAINING_RECORD` | Presence in at least one copy |
+| FINDING `REPORT_EXPOSED_PII` | A populated subject identifier slot (D.3.3, D.3.8) |
+| FINDING `REPORT_ACTIVE_DATA_FLOW` | `enabled=true` or equivalent |
+| FINDING `REPORT_RESTORE_RISK` | A RESTORABLE reading (D.3.6) |
+| `VERIFY_RECORD_ABSENT` | An explicit named negative (A.4.2a), or a qualifying omission (C.8) |
+| `VERIFY_RECORD_PRESENT` | Presence **and** the retention condition TRUE (D.2.3). The cited observation must show `retention_until` / `retained_until`, or another admissible observation must establish the condition. See F.2.3. |
+| `VERIFY_RECORD_REDACTED` | All prohibited slots CLEARED and the stable reference present (D.3.8). For support messages, requester identifiers CLEARED (D.3.1). |
+| `VERIFY_RECORD_ANONYMIZED` | All four slots CLEARED (D.3.3) |
+| `VERIFY_DATA_FLOW_DISABLED` | `enabled=false` or equivalent |
+| `VERIFY_RESTORE_BLOCKED` | A BLOCKED reading |
+
+#### F.2.2 Selection among valid candidates
+
+Only after the filter, select `max(candidates, key=(observed_time, file_captured_at, file_id))`. Here `observed_time` = inner time, else file capture. This is the "latest pre-cutoff observation proving the state" rule. [FACT] It agrees with 70/75 sample citations, and the other 5 are explained by omission/PDF (`sample_case_analysis.md` §3.4).
+
+The tie-break orders only candidates that **agree**. Disagreeing candidates were already turned into UNKNOWN by E.3.1.
+
+For omission proofs, the candidate is the single snapshot chosen by C.8.2 (coverage level first, then recency). F.2.2 does not override that choice.
+
+#### F.2.3 Single-file proof requirement
+
+`evidence_id` holds one ID. Therefore:
+
+- A COMPLETE verification step must cite **one** observation that by itself proves the full claimed state.
+  - Example: a single analytics observation in which all four slots are CLEARED.
+  - Example: a single audit-record observation showing presence and `retention_until`.
+- If the state is proven only by **combining** observations, no single valid citation exists. This is allowed by D.3.3 rule 1 (slots across observations) and D.2.3 (condition from another observation). The resource's verdict stays COMPLIANT for analysis, but the step cannot be cited.
+- In that situation the case is held with `CITATION_UNSUPPORTED`. No partial citation is used. Recorded as **Q-SPLIT-PROOF** (F.6).
+
+### F.3 Serialization and failure handling
+
+#### F.3.1 Row status rules
+
+| Case outcome | Written row |
+|---|---|
+| `emit(NOT_APPLICABLE)` (only from explicit NON_DELETION intent, E.1.2) | `case_id,NOT_APPLICABLE,[]` |
+| `emit(COMPLETE)` | Verification-only steps, all cited |
+| `emit(INCOMPLETE)` (only with ≥1 genuine `VIOLATING` resource, E.4.2) | Findings (cited) + remediation (`""`) + verification (`""`) |
+| `hold(any reason)`, including processing errors | **No row is written.** The case goes to the held report. |
+
+Failure handling:
+
+- The earlier "failure isolation → conservative row" rule is **removed**. An exception inside a case becomes `hold(ERROR)` with the traceback stored in `runs/`.
+- Errors are **never** mapped to INCOMPLETE (that would need a fabricated finding) or to NOT_APPLICABLE (that would misstate intent).
+- No finding, citation or step is ever created to make a case representable.
+
+#### F.3.2 The 518-row contract
+
+The output must have exactly 518 rows with permitted statuses [REQ]. Held cases cannot be honestly represented [A.8 Q-UNDETERMINED]. So the writer is all-or-nothing:
 
 ```text
-OP_INDEX = table A.3 order
-STATE = {op: state} from A.3; PHASE = {op: phase}
-steps = findings + remediation + verification          # as (op, system_id, resource_id, evidence_id)
-dedupe on (op, system_id, resource_id)                  # e.g. account in both finding-verify and base set
-steps.sort(key=lambda s: (OP_INDEX[s.op], s.system_id, s.resource_id))
-for i, s in enumerate(steps, 1): s.step_no = i; s.phase = PHASE[s.op]; s.state = STATE[s.op]
+write_output(results):
+  emitted = [r for r in results if r.is_emit]
+  held    = [r for r in results if r.is_hold]
+  write runs/<ts>/staging_output.csv with emitted rows (same format, for inspection)
+  write runs/<ts>/held_report.md with every held case: reason codes, REQ / UNRESOLVED sets, evidence refs,
+        and the would-be steps where computable  (case_id/resource_id/file_id only; no personal values, A.7.3)
+  if held or len(emitted) != 518 or validate(staging) has errors:
+      print diagnostic (counts by held reason, first validator errors)
+      exit(non-zero)                      # root output.csv is NOT created or overwritten
+  else:
+      atomically replace <repo>/output.csv with the staging file; exit(0)
 ```
 
-- `system_id` = the canonical owning system of the resource (`account_service`, `search_service`, `analytics_platform`, `support_platform`, `export_service`, `integration_service`, `backup_service`, `security_service`, `identity_service`, … [FACT: values in samples]).
-- [FACT] Samples use the owning system even when the observation came from a replica or a `records_assurance` bundle.
-- The table/collection → system map is defined in `config.py`. `object_store` vs `export_service` naming is **[UNRESOLVED]** for exports observed via object storage; the samples use `export_service`.
-- Sorting is plain Python string comparison (ASCII) on `system_id`, then `resource_id`. [FACT] Lexicographic, e.g. `account_service` < `analytics_platform`.
+- The root `output.csv` therefore either satisfies the full contract or does not exist from that run.
+- A previous `output.csv` is not overwritten by a failing run. The diagnostic states that it is stale.
+- Changing this behaviour, e.g. writing a partial file, requires authorization (A.8.3).
 
-### F.2 Citation rules
+#### F.3.3 Encoding and determinism
 
-| Step kind | `evidence_id` |
+| Aspect | Rule |
 |---|---|
-| FINDING | `file_id` of the latest admissible-for-citation observation proving the violating state (latest by `file_captured_at`, then `observed_at`, then `file_id`) [FACT: 70/75 sample citations follow "latest pre-cutoff file mentioning the resource"] |
-| VERIFICATION in COMPLETE | `file_id` of the latest admissible observation proving the compliant state; for omission, the qualifying snapshot (C.8) |
-| REMEDIATION, VERIFICATION in INCOMPLETE | `""` |
+| CSV | `csv.writer`, `QUOTE_MINIMAL`, `lineterminator="\n"`, UTF-8 without BOM, header `case_id,deletion_status,steps_json` |
+| JSON | `json.dumps(steps, ensure_ascii=False, separators=(",", ":"))`, keys emitted in the order `step_no, phase, system_id, resource_id, operation, state, evidence_id`; `step_no` int, other fields str |
+| Escaping | Embedded quotes are doubled by the csv module. No other escaping. A round-trip test parses each written cell back and compares it to the step list. |
+| Empty array | The literal `[]` |
+| Row order | **Q-SORT decision (A.2.1), stated once in `config.ROW_SORT_KEY`**: ascending integer suffix of `case_id`. The writer and the validator both import this key. |
+| Malformed evidence | Never reaches the writer. Parse failures are `EVIDENCE_GAP` (B.3.2) and lead to UNKNOWN verdicts, which lead to holds. |
+| Determinism | No time-dependent or random values in rows. The staging-file hash of two runs with identical inputs and caches must match (J). |
 
-- `activity_id` / `audit_id` are valid citation types [REQ] but are claims or identity history. **[PROPOSAL]** Never cite them as proof of state. No sample cites them.
-- If a COMPLETE-case resource has no citable proof, it is omitted from the steps and logged; no uncited verification is emitted.
+[FACT] Public samples use zero-padded IDs (`case_01`–`case_32`), so their order is identical under numeric and lexicographic sorting. The evaluation inputs (`case_33`–`case_550`) are listed in numeric order in `deletion_requests.csv`. The sample file therefore neither confirms nor contradicts the decision. The organizer confirmation requested under Q-SORT stays open.
 
-### F.3 Serialization
+### F.4 Validator (M9)
 
-- `json.dumps(steps, ensure_ascii=False, separators=(",", ":"))` with fixed key order `step_no, phase, system_id, resource_id, operation, state, evidence_id`. `step_no` is an int; all others are strings.
-- `csv.writer(f, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")`, UTF-8 without BOM. The JSON's embedded quotes are doubled by the csv module.
-- `NOT_APPLICABLE` → literal `[]`.
-- Rows sorted by natural numeric case order, i.e. `int(case_id.split("_")[1])`. **[UNRESOLVED]** "sorted by `case_id`" may mean lexicographic. Natural order matches `deletion_requests.csv` and `sample_output.csv` [FACT: both are listed numerically]. The validator reports both orders, and the decision is documented in the README.
-- Failure isolation: an exception in one case is caught; that case gets a conservative row (`NOT_APPLICABLE` only if intent is non-deletion, otherwise `INCOMPLETE` cannot be produced without findings), and the error is logged. The run **fails loudly** (non-zero exit) if any case errored, so a partial file is never silently submitted.
+Rules are generated from `OPERATIONS`, `TREATMENTS`, `CONDITIONS` and `ROW_SORT_KEY`, and from the C/D/E functions. The validator does not keep its own copy of any rule.
 
-### F.4 Output validator (`validate_output`)
+**L1 Structural**
 
-Checks:
+1. Header exactly `case_id,deletion_status,steps_json`.
+2. Exactly 518 data rows.
+3. The `case_id` set equals the input set; no duplicates.
+4. Rows are in `ROW_SORT_KEY` order.
+5. `deletion_status` ∈ the three permitted values.
+6. `steps_json` parses as a JSON array.
+7. Each element has exactly the 7 keys with the right types.
+8. `operation` is valid, and `phase` and `state` equal the `OPERATIONS` lookup.
 
-- header exact; 518 rows; IDs = set of input IDs; no duplicates; sort order;
-- each `steps_json` parses and is a list; each object has exactly the 7 keys;
-- enums valid; `state`/`phase` consistent with `operation`; `step_no` consecutive; phase order and within-phase sort;
-- `NOT_APPLICABLE` ⇔ `[]`;
-- COMPLETE ⇒ only VERIFICATION with non-empty evidence;
-- INCOMPLETE ⇒ ≥1 FINDING; FINDINGs cite evidence; others empty;
-- every cited ID exists in the manifest and has `captured_at <= audit_at` of that case;
-- finding set == remediation set; each remediated resource has the matching verification.
+**L2 Contract**
+
+1. `step_no` is consecutive from 1.
+2. Steps are in (operation index, `system_id`, `resource_id`) order.
+3. No duplicate `(operation, system_id, resource_id)`.
+4. `NOT_APPLICABLE` ⇔ `[]`.
+5. COMPLETE has only VERIFICATION steps, and every one has a non-empty `evidence_id`.
+6. INCOMPLETE has ≥1 FINDING; every FINDING has a non-empty `evidence_id`; every REMEDIATION and VERIFICATION has `""`.
+
+**L3 Citation meaning** (uses the internal case result: scope, assessments, refs)
+
+For every non-empty `evidence_id`, all six F.2.1 checks hold:
+
+- the ID is a manifest `file_id` (not an activity or audit ID);
+- capture ≤ `audit_at`;
+- an admissible observation of that resource is in the file (or it is the qualifying omission snapshot);
+- the resource is linked to the case subject by a C.5 link;
+- the observation supports the step's state;
+- the ref is a `PROOF` ref.
+
+**L4 Policy completeness and dependencies**
+
+1. FINDING set = REMEDIATION set = `VIOLATING`. Each chain matches `TREATMENTS[category]`.
+2. VERIFICATION set = `REQ`. Each verification op is the chain's final verification. `VERIFY_RECORD_PRESENT` is used only for retained categories with condition TRUE.
+3. COMPLETE ⇒ `REQ == PROVEN_OK`, and `UNRESOLVED`, `UNEXPRESSIBLE` and `WF_VIOLATING` are empty.
+4. INCOMPLETE ⇒ `VIOLATING` is non-empty and `UNRESOLVED` is empty. Each finding's verdict is `VIOLATION_PROVEN` with OBSERVED proof. No finding exists without one.
+5. Prohibited actions: no DELETE on BACKUP_ARCHIVE, SECURITY_AUDIT_LOG or LEGAL_HOLD_RECORD. No REMEDIATION on a resource absent from `VIOLATING`.
+6. D.4 dependencies: D1 violations are errors; D2 conflicts are reported.
+7. No step references a resource that is not in scope or is only a workflow candidate.
+
+**Run-level checks**
+
+1. Held count = 0.
+2. Emitted rows + held = input count.
+3. No `FAILED` text-evidence file and a valid media cache (B.3.2, B.1.3), or each gap explicitly accepted.
+
+Any L1–L4 or run-level failure blocks writing the root `output.csv` (F.3.2).
+
+**Independence caveat.** L3/L4 reuse the pipeline's own C/D/E functions, so a bug in a shared function can pass validation. This is mitigated by:
+
+- function-level unit tests against hand-built fixtures (G);
+- the public-sample evaluator (G.3);
+- a structural re-read of the written CSV through L1/L2 alone, using only the file, without internal state.
+
+### F.5 What Section F guarantees (acceptance criteria)
+
+| Criterion | Mechanism |
+|---|---|
+| No false COMPLETE | COMPLETE is only emitted when E.4.2 proves every `REQ` member with an F.2-valid single-file citation; re-checked by F.1.1(1–2) and L4(2–3). An unknown or unresolved member leads to a hold, never an omission. |
+| No fabricated findings after errors | Errors become `hold(ERROR)` (F.3.1). Findings come only from `VIOLATING` with OBSERVED proof (L4(4)). |
+| Consistent output and validation contract | One `OPERATIONS` / `TREATMENTS` / `ROW_SORT_KEY` source; all-or-nothing writer (F.3.2); L1–L4 + run-level checks (F.4) |
+| Claims never prove state | F.2.1 check 1, F.1.2 proposed-vs-performed rule, L3 |
+
+### F.6 Cross-section contradictions and open items (not edited outside F)
+
+New held reasons and decisions introduced here:
+
+- `SYSTEM_AMBIGUOUS` (F.1.3);
+- `CITATION_UNSUPPORTED` (F.2.3);
+- `VALIDATION_FAILED` and `ERROR` already exist in B/E;
+- **Q-SPLIT-PROOF** (F.2.3);
+- the reporter-service alias map is an [ASSUMPTION] (F.1.3).
+
+| Topic | Where | Conflict | Proposed resolution (open for approval) |
+|---|---|---|---|
+| Three statuses vs held cases | A.2, A.8.3, E.4.3 vs F.3 | None remaining inside F. F never serializes a held case. The conflict is now a **run-level blocker** (F.3.2). | Keep A.8.3; the user chooses option a/b/c before the final run |
+| 518 rows vs unrepresentable cases | A.2 vs A.8.3/F.3.2 | Unresolved by design. Projected ≥6 held public samples (A.8.3). | Same: authorization required; no schema change |
+| Citation rules vs admissibility | C.7, C.8 vs F.2 | Consistent. **But D.3.3 rule 1** (slots combined across observations) and **D.2.3** (condition from another observation) allow verdicts that F.2.3 cannot cite with one ID. | Q-SPLIT-PROOF. Option 1: keep F.2.3 (hold). Option 2: amend D.3.3 so that COMPLETE requires a single-observation proof (the verdict itself becomes UNKNOWN otherwise). Both avoid a false COMPLETE; option 2 removes the held category. |
+| Retention condition evidence for `VERIFY_RECORD_PRESENT` | D.2.3 (rule_12 condition needs `retention_until`) vs F.2.1 check 5 / F.2.3 | [FACT] 6 of the 7 audit records cited in COMPLETE samples carry `retention_until` in the cited file (evidence_92, evidence_94). `audit_record_6909` (case_31, evidence_51) has **no** `retention_until` in any participant file, so its condition is `UNKNOWN(CONDITION_UNKNOWN)`. Under the current D/E/F rules, case_31 is held, although its expected answer is COMPLETE. | Not relaxed to match the sample. Open as **Q-RETENTION-UNOBSERVED**: (1) keep strict (held); or (2) an explicitly approved policy that a present SECURITY_AUDIT_LOG record without an observed retention field is treated as retained. That changes D.2.3 and needs authorization. |
+| Operation order vs dependencies | A.3.3, D.4 vs F.1.4 | Consistent: separate validation, sort wins, D2 conflicts reported | Q-DEP stays open |
+| Sample sorting vs specification | A.2.1 vs F.3.3 | No conflict in the data (zero-padded samples). The spec wording is ambiguous. | Q-SORT stays open for organizer confirmation |
+| A.4.5 gate pseudocode | A | Older and less complete than E.4.2 / F.4 L4(3–4) | Replace A.4.5 pseudocode with a reference to E.4.2 |
+| A.5 validator layers | A | L3/L4 text predates F.2.1 checks 1/4/6, F.2.3 and L4(5–7) | Point A.5 to F.4 as the authoritative list |
+| B.3 diagram, B.3.3, B.4.3 | B | Lack `SYSTEM_AMBIGUOUS`, `CITATION_UNSUPPORTED`, `VERIFICATION_SET_INCOMPLETE` and the D.6 reasons; the diagram shows the old "validation errors → held" without the all-or-nothing writer | Add reasons; update the diagram's writer node |
+| B.5 M8/M9 | B | M8 "step is not emitted and the case is held" matches; M9 "zero undecided held cases" matches. B.5 should reference F.2.1 and F.3.2. | Reference only |
+| C.6 / C.7 text | C | Still says decisions pending (Q-WEAK-VERIFY, Q-LATE-LINK) | Update to A.8.1 decisions |
+| D.6 list | D | Pending items unchanged; adds Q-SPLIT-PROOF linkage | — |
+| E.8 list | E | F.3 conflict listed there is now fixed in F; the rest remains | Update E.8 when aligning |
+| G | G | Needs tests for F.1.1 invariants, F.1.3 system resolution, F.2.1 checks 1–6 (each with a failing fixture), F.2.3, F.3.2 writer behaviour (held ⇒ no `output.csv`, non-zero exit, stale-file message), CSV round-trip, L1–L4 failing fixtures | — |
+| H | H | No stage for the all-or-nothing writer, the held report, or system resolution | — |
+| I | I | R18 (sort) and R19 (system naming) are superseded by F.3.3 / F.1.3. Add Q-SPLIT-PROOF, `SYSTEM_AMBIGUOUS` risk. | — |
+| J | J | Must add: held count 0 (or authorized), validator L1–L4 clean, staging-hash determinism, no stale `output.csv` | — |
+
+**Remaining blockers before Section F can be approved:**
+
+1. Q-SPLIT-PROOF decision; Q-RETENTION-UNOBSERVED decision (projected to hold case_31).
+2. Confirmation of the F.1.3 reporter-service alias entries.
+3. Q-SORT organizer confirmation, which does not block the plan but blocks final submission.
+4. The run-level held-case blocker (A.8.3), a user decision before the final run.
 
 ---
 
