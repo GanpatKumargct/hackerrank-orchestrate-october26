@@ -109,7 +109,7 @@ Verified facts:
 **Decision:** implement exactly one order. Rows are written in **ascending numeric order of the integer suffix of `case_id`**, which is identical to the order of `deletion_requests.csv`. The validator enforces only this order.
 
 - Rationale: it is the only order the challenge itself uses for the evaluation inputs, and it is a stable, documented key.
-- **Open confirmation (Q-SORT, A.8):** ask the organizers/user whether lexicographic order is expected. If the answer differs, the single sort key is changed in `config.py`. The two orders are never both supported.
+- **Decided (A.8.1 Q-SORT).** Organizer confirmation is the external follow-up X-SORT-CONFIRM. The plan does not claim it was obtained. If organizers specify otherwise, only `config.ROW_SORT_KEY` changes. The two orders are never both supported.
 
 ### A.3 Canonical operation and treatment tables — single source of truth (fixes A3.1, A3.2, A3.3)
 
@@ -169,8 +169,8 @@ These are two separate concepts and are validated separately.
 
 **D2 against the output order.** The output order sorts by `system_id`/`resource_id` within an operation, so it can disagree with a downstream→source dependency. [FACT] In every sample, the copy and its source share one `resource_id` (e.g. a replica copy of `account_005`), so no sample exhibits D2.
 
-- [UNRESOLVED Q-DEP] If a run detects a D2 dependency whose resources would sort source-first, the conflict is **not** resolved by reordering. The output follows the explicit sort rule, because it is the more specific instruction and is stated in both problem_statement "Rules" and README "Output".
-- The conflict is recorded in the explain trace and counted in the evaluation report, and the user is asked to confirm before final generation.
+- **Decided (A.8.1 Q-DEP).** If a run detects a D2 dependency whose resources would sort source-first, the conflict is **not** resolved by reordering. The output follows the explicit sort rule, because it is the more specific instruction and is stated in both problem_statement "Rules" and README "Output".
+- The conflict is recorded as `DEPENDENCY_ORDER_CONFLICT` in the explain trace and the evaluation report. Non-conflicting dependencies (D1) are still enforced.
 
 ### A.4 Decision requirements and correctness contracts
 
@@ -224,10 +224,10 @@ Retained records are SECURITY_AUDIT_LOG (rule_12), LEGAL_HOLD_RECORD (rule_13) a
 | Condition | Presence | Verdict | Output effect |
 |---|---|---|---|
 | TRUE | PRESENT | COMPLIANT_PROVEN | VERIFY_RECORD_PRESENT (cited in COMPLETE; `""` in INCOMPLETE) |
-| TRUE | ABSENT | VIOLATION_PROVEN, but **no finding operation exists** for a missing retained record | No invented step. The case cannot be COMPLETE (A.4.5). The violation is recorded in the explain trace and reported (Q-RETAIN). |
-| TRUE | UNKNOWN | UNKNOWN | Blocks COMPLETE (A.4.5). In INCOMPLETE, a future VERIFY_RECORD_PRESENT check is still listed. |
-| FALSE | any | Not a retained record under that rule; no applicable rule row | No step; logged (Q-RETAIN) |
-| UNKNOWN | any | UNKNOWN | Blocks COMPLETE |
+| TRUE | ABSENT | VIOLATION_PROVEN, but **no finding operation exists** | No invented step and no `VERIFY_RECORD_PRESENT`. The case is **held** with `RETAINED_RECORD_MISSING`, even if other findings exist (A.8.1 Q-RETAIN). |
+| TRUE | UNKNOWN | UNKNOWN | Blocks COMPLETE and INCOMPLETE emission (E.4.2); the case is held with its uncertainty reason |
+| FALSE | any | `UNKNOWN(POLICY_GAP)`: the supplied rule does not apply and no alternative is given | The case is held (A.8.1 Q-RETENTION-EXPIRED / Q-HOLD-EXPIRED) |
+| UNKNOWN | any | `UNKNOWN(CONDITION_UNKNOWN)` | The case is held (A.8.1 Q-RETENTION-UNOBSERVED, strict) |
 
 **Never invent an output operation** to represent a missing-record violation [REQ: AGENTS §6.4].
 
@@ -243,22 +243,20 @@ Activities and `reported_status` are claims. They never prove state.
   - The primary account is always a member.
   - Candidates that are only ambiguously linked (C.6) are **not** members. They are recorded as unresolved scope, and never as proof of completeness.
 
-```text
-gate(case):
-  V = {r: verdict(r) for r in REQ(case)}
-  if any(v == VIOLATION_PROVEN with an expressible finding for v in V):  return INCOMPLETE
-  if all(v == COMPLIANT_PROVEN and has_citable_proof(r) for r, v in V): return COMPLETE
-  return UNDETERMINED          # internal only; never silently mapped to COMPLETE
-```
+The authoritative gate is **E.4.2**. In summary:
+
+- COMPLETE only if every `REQ` member is `COMPLIANT_PROVEN` with a single-observation citation;
+- INCOMPLETE only if there is an expressible violation and no `REQ` member is UNKNOWN;
+- everything else is held.
 
 - **UNKNOWN never counts as compliance.** A required resource whose state is unknown is never silently omitted from a COMPLETE answer.
-- **[UNRESOLVED Q-UNDETERMINED]** The output contract has no status for "not provable". INCOMPLETE requires findings that cite evidence, which cannot exist for an unknown state.
-- Until the user decides a policy, `UNDETERMINED` cases are:
-  - listed in the run summary and the evaluation report, with per-resource reasons;
-  - written to `output.csv` only after an explicit, documented decision on their mapping. The final-output readiness check (J) fails while any case is `UNDETERMINED` without such a decision.
-- On the public samples, the gate must not change any COMPLETE answer. [FACT] Every expected COMPLETE verification step has citable proof. This is an acceptance test for the gate.
+- **Decided (A.8.1 Q-UNDETERMINED).** The output contract has no status for "not provable", so such cases stay on the internal held path.
+- Held cases are listed in the held report and the evaluation report with per-resource reasons. They are never written to `output.csv` unless X-HELD-MAPPING authorizes a mapping (A.8.2–A.8.3, F.3.2).
+- [FACT] Under the decided rules, some public-sample COMPLETE answers become held (A.8.3: case_01, 02, 04 and 31 are projected). Those are measured and reported at Stage 11. They are not tuned away.
 
 ### A.5 Output validation semantics (fixes A2.3, A2.4)
+
+The authoritative, complete validator specification is **F.4**. This subsection summarises it.
 
 The validator (M9) runs four layers. Layers L3 and L4 need the pipeline's internal case results (scope, observations, links); the validator receives them alongside `output.csv`.
 
@@ -344,7 +342,7 @@ Before packaging, the zip listing is checked to contain `code/evaluation/evaluat
   - the exact run, evaluate and test commands;
   - the output location;
   - the flag settings used.
-- The addition is made only after the user confirms where it goes (top or bottom of the root README) **[pending Q-README]**. No other edits are made to challenge text.
+- **Decided (A.8.1 Q-README):** the section is appended at the **bottom** of the root README at Stage 13. No other edits are made to the challenge text.
 
 #### A.7.3 Privacy rules for logs, traces and archives (fixes A5.3)
 
@@ -360,88 +358,106 @@ All dataset persons are fictional [REQ: AGENTS §7], but personal-data handling 
 
 ### A.8 Decision register
 
-This register is the single place where decisions and open questions are recorded. Other sections reference IDs from here. Each row states the source of the decision ("user" = decided by the project owner in the session dated 2026-10-25) and any condition attached to it.
+This register is the single authoritative place for decisions. Other sections reference its IDs. "User" means the project owner's decisions recorded on 2026-10-25.
 
 #### A.8.1 Decided
 
-| ID | Topic | Decision | Source | Conditions / constraints |
-|---|---|---|---|---|
-| Q-SORT | Row order | Numeric suffix order of `case_id` (A.2.1) | plan | Organizer confirmation still requested; single implemented order |
-| Q-REPORTS | Report location | `code/evaluation/evaluation_report.md`, `code/evaluation/usage_report.md` (A.7.1) | plan, README line 99/145 | — |
-| Q-WEAK-VERIFY | Steps for resources linked only by workflow candidates (C.6) | **No.** No finding, remediation or verification step is generated for a resource whose only basis is a `WORKFLOW_CANDIDATE`. | user | A resource enters a case only through an independently grounded link (C.5.2: `RECORD_FIELD`, `TRACE_KEY`, `FREE_TEXT_MENTION`, `DERIVED_FROM`, `CATALOG_CLAIM`) or another basis explicitly approved later and recorded here. Workflow candidates stay a separate, non-proof category (C.6) and are reported as unresolved scope. Evidence requirements are not relaxed to improve sample matching. |
-| Q-LATE-LINK | Late-captured files with inner timestamps ≤ `audit_at` | **Yes, for identity/scope linking only.** | user | Strict conditions are those of `admissible_for_link` (C.7): file `captured_at > audit_at`, inner `observed_at` present and `≤ audit_at`, no `observed_after_capture` anomaly. Such evidence **never** establishes resource state, never serves as state-verification evidence, and is never cited. Links carry the note `LINK_EVIDENCE_POST_CUTOFF`; provenance (file and inner times) is preserved; the separation is covered by `test_admissibility.py` cases 4–6 and the `PROOF`-role assertion (C.7). |
-| Q-UNDETERMINED | Cases that fail the completeness gate without an expressible violation (A.4.5), plus `UNSURE` intent, `IDENTITY_UNRESOLVED`, `RETAINED_RECORD_MISSING`-only and `ERROR` cases | **Internal held path.** No new output status. Unknown evidence is never mapped to COMPLETE, INCOMPLETE or NOT_APPLICABLE. The output schema is not modified without authorization. | user | Before final output generation, the run must report the held-case count and the conflict in A.8.3. |
-| Q-MEDIA-PROVIDER | PNG extraction provider | **OpenAI preferred.** | user | Two preconditions must be met before any extraction call: (1) confirm which vision-capable model is available to the account; (2) obtain explicit approval to transmit the 11 screenshots externally. Until both are met, no screenshot is sent and PNGs remain `EXTRACTION_FAILED` / `EVIDENCE_GAP` (B.1.3). Each cache entry preserves image SHA-256, prompt SHA-256, provider, model ID, extraction time and schema version, with deterministic hash validation at run time. Extracted facts are never fabricated or entered manually. [FACT] The `openai` Python SDK 2.29.0 is already installed, so no new dependency is needed for this choice. Model availability has **not** been verified: no API call has been made. |
-| Q-DOCS-ZIP | Whether `docs/` goes into `code.zip` | **Excluded from `code.zip`. Repository-only.** | user rule applied to the packaging text | See the packaging check below. Revisit only if the organizers state that additional documentation folders are permitted. |
+| ID | Decision | Source | Constraints |
+|---|---|---|---|
+| Q-SORT | Rows are written in ascending numeric order of the `case_id` suffix, which matches the order of `deletion_requests.csv`. Implemented once as `config.ROW_SORT_KEY` (A.2.1, F.3.3). | user (Q16) | The plan does not claim organizer confirmation. Confirmation is the external follow-up X-SORT-CONFIRM and does not block implementation. |
+| Q-REPORTS | Reports go in `code/evaluation/evaluation_report.md` and `code/evaluation/usage_report.md` (A.7.1). | plan; README lines 99/145 | — |
+| Q-UNDETERMINED / held path | Conservative held path. No new output status. Held results are never mapped to COMPLETE, INCOMPLETE or NOT_APPLICABLE. The held report and the all-or-nothing writer (F.3.2) are implemented as planned. | user (Q1) | After the first complete analysis run (Stage 11), report the held count, every held case ID, its reason and its evidence gap. Reason-specific mappings or extra evidence work are decided only after that review (X-HELD-MAPPING). No root `output.csv` while held cases remain. |
+| Q-WEAK-VERIFY / primary-account basis | **No.** Workflow-only candidates are not grounded links. They never produce findings, remediation or verification. A required primary account without an independently grounded basis keeps the case held. | user (Q2) | Identity requirements are not weakened to match samples. |
+| Q-LATE-LINK | **Yes, link-only.** Late-captured evidence with inner time ≤ `audit_at` may support identity/scope links under `admissible_for_link` (C.7). It never proves state, never verifies state, and is never cited. | user | Provenance is preserved; separation is tested (C.7, G.1). |
+| Q-RETENTION-UNOBSERVED | **Strict.** If `retention_until` cannot be established from admissible evidence, the rule_12 condition is `UNKNOWN(CONDITION_UNKNOWN)` and the case is held. Existence alone does not imply retention. | user (Q3) | Projected to hold case_31 (F.6). |
+| Q-SPLIT-PROOF | **Option 2.** A COMPLETE verification step must be supported by a **single admissible observation** that independently proves the entire state the step claims. A state establishable only by combining observations is `UNKNOWN(PROOF_NOT_SINGLE_OBSERVATION)` for the completeness gate. | user (Q4) | No partial citation. The `CITATION_UNSUPPORTED` path is retired, but such a case is still held via UNKNOWN (D.3.3, F.2.3). |
+| Q-VERIFICATION-SET-INCOMPLETE | **Held.** If any required resource is UNKNOWN, the case is held even when another resource has a proven violation (E.4.2). | user (Q5) | No INCOMPLETE that omits a required check. |
+| Q-EPISODE | `EPISODE_MODE = prior_request` (E.2.2) | user (Q6) | Earlier-episode exclusion is tested (G.4 E-14). |
+| Q-RETAIN | A required retained record (including a tombstone's stable reference) **proven absent** → the case is held with `RETAINED_RECORD_MISSING`. This applies **even if other findings exist**. No remediation is invented, and no `VERIFY_RECORD_PRESENT` is emitted for it. The reason is recorded in the explain trace and the held report. Presence or condition only UNKNOWN → blocks COMPLETE with its own uncertainty reason. | user (Q7) | D.3.9, E.4.2 |
+| Q-RETENTION-EXPIRED | Expired security-audit retention → `UNKNOWN(POLICY_GAP)` → held. No new treatment. A test is required even though the current data has no case (D.3.4). | user (Q8) | — |
+| Q-HOLD-EXPIRED | Expired or released legal hold → `POLICY_GAP` → held, unless participant-visible policy clearly establishes the treatment. No new operation (D.3.5). | user (Q9) | — |
+| Q-DEP | The output sort contract takes precedence over downstream→source ordering. The order is unchanged; `DEPENDENCY_ORDER_CONFLICT` is reported and tested. Non-conflicting dependencies (D1) are still enforced. | user (Q10) | A.3.3, D.4.2, F.1.4 |
+| Q-D-ASSUMPTIONS | **Provisionally approved, still labelled [ASSUMPTION], each tested:** (a) legacy contact index → SECONDARY_IDENTIFIER / DELETE; (b) rule_05 shared-context indicators; (c) rule_14 restore-block condition TRUE unless admissible evidence shows blocking is impossible; (d) handover "no direct identifier" counts as CLEARED slots **only when that evidence actually states it for that record**, and a missing field is never proof; (e) connector → target-system map; (f) `VERIFY_RECORD_PRESENT` for a required legal-hold record when its condition and presence are proven | user (Q11) | Never presented as challenge requirements or verified facts |
+| Q-SYSTEM-ALIASES | `profile_service → account_service` and `support_replica → support_platform` | user (Q12) | Centralised in `config.SYSTEM_ALIASES`; applied only below explicit owner fields (F.1.3); tested |
+| Q-MEDIA-PROVIDER | OpenAI preferred. **Screenshot transmission is not authorized.** No vision API call is made. Missing or unverified PNG extraction is an explicit coverage gap (`EVIDENCE_GAP`). | user (Q13) | Before the final run, report the available vision-capable model options and request explicit approval (X-MEDIA-TRANSMISSION) |
+| Q-INTENT-LLM | `AUDIT_LLM_ENABLED=0` by default. A deterministic `UNSURE` keeps the case held, with the reason reported. No LLM call unless separately authorized. | user (Q14) | — |
+| Q-README | The original challenge text is preserved. A clearly delimited "Solution — Setup and Run" section is appended at the **bottom** of the root README. | user (Q15) | Added at Stage 13 |
+| Q-DOCS-ZIP | `docs/` is excluded from `code.zip`. It stays repository-only, because there is no separate submission slot. | user rule + packaging text | See the packaging check below |
 
-**Packaging check behind Q-DOCS-ZIP** [FACT: exact repository text inspected]:
+**Packaging check behind Q-DOCS-ZIP** [FACT: exact text inspected]:
 
-- Permitted contents of `code.zip`: "Runnable solution, prompts, configuration, `README.md`, and `evaluation/` reports" (README line 122; AGENTS §6.9 line 363; problem_statement line 145).
+- `code.zip` contents: "Runnable solution, prompts, configuration, `README.md`, and `evaluation/` reports" (README line 122; AGENTS line 363; problem_statement line 145).
 - Packaging command: `README.md` and `code` only (README lines 134, 140).
-- Exclusion list: `dataset/`, virtual environments, dependency caches, `__pycache__`, nested archives, API keys, credentials, real personal data, sensitive configuration (README lines 146–147; AGENTS line 368). `docs/` is neither listed as permitted nor listed as excluded.
-- Submission items: `code.zip`, `output.csv`, `chat_transcript` (`log.txt`), AI interview (README lines 122–125; AGENTS lines 363–366). **No slot exists for a separate documents upload.**
+- Exclusion list: `dataset/`, venvs, caches, nested archives, secrets, personal data (README lines 146–147; AGENTS line 368). `docs/` is neither listed as permitted nor listed as excluded.
+- Submission items: `code.zip`, `output.csv`, `chat_transcript`, AI interview. There is no slot for separate documents.
 
-Applying the rule "include only if permitted", `docs/` is not added to the zip, and it cannot be submitted separately. The plan therefore stays in the repository only. The submission README section (A.7.2) and the evaluation reports carry the explanations a reviewer needs.
+#### A.8.2 Remaining external or evidence-dependent items
 
-#### A.8.2 Open
+Only items that cannot be decided inside the plan remain here.
 
-| ID | Topic | Status |
+| ID | Item | Blocks |
 |---|---|---|
-| Q-README | Position of the solution section in the root README (A.7.2) | Open: user confirmation |
-| Q-RETAIN | Missing required retained record (audit record, active legal hold, tombstone reference, backup archive), and whether such a case's verification lists `VERIFY_RECORD_PRESENT` (D.3.9) | Open: held path; no invented step |
-| Q-RETENTION-EXPIRED | Security audit record past `retention_until` (D.3.4) | Open: `POLICY_GAP`, held; [FACT] not exercised by current data |
-| Q-HOLD-EXPIRED | Legal hold expired or released (D.3.5) | Open: `POLICY_GAP`, held; [FACT] not exercised by current data |
-| Q-DEP | Downstream→source dependency that conflicts with the A.2 sort order | Open: output follows the sort rule; conflict reported (A.3.3, D.4.2) |
-| D-assumptions | Section D [ASSUMPTION]s: legacy contact index → SECONDARY_IDENTIFIER; rule_05 context indicators; rule_14 default TRUE; handover "no direct identifier" counts as cleared slots; connector → target-system map; legal-hold `VERIFY_RECORD_PRESENT` | Open: user confirmation |
+| X-SORT-CONFIRM | Organizer confirmation of the numeric `case_id` order | Nothing in implementation; noted at submission |
+| X-MEDIA-TRANSMISSION | (1) Report the vision-capable OpenAI models actually available to the account; (2) obtain explicit approval to transmit the 11 screenshots | Stage 12 (media cache); until then PNG facts are `EVIDENCE_GAP` |
+| X-HELD-MAPPING | After the first complete analysis run, the user reviews the held list and either authorizes reason-specific mappings or extra evidence work, or accepts that no compliant `output.csv` exists | Stage 13 (final output) |
 
-#### A.8.3 Blocking conflict: held cases vs the 518-row output contract
+#### A.8.3 Blocking conflict: held cases vs the 518-row contract
 
-**The two requirements cannot both be satisfied when any case is held.**
+- [REQ] `output.csv` must contain exactly 518 rows, each with one of three statuses.
+- The decided held path (Q-UNDETERMINED) forbids representing held cases with an invented or mapped status.
 
-- **Requirement (explicit):** `output.csv` must contain exactly 518 data rows, one per `case_id`. Each `deletion_status` must be COMPLETE, INCOMPLETE or NOT_APPLICABLE [REQ: AGENTS §6.3, problem_statement "Required Output", README checklist].
-- **Decision (Q-UNDETERMINED):** held cases get no invented status and are not silently mapped.
-- **Consequence:** if the final run has ≥1 held case, a compliant `output.csv` cannot be produced without either resolving the case with evidence or an **authorized** mapping decision.
+If ≥1 case is held, a compliant `output.csv` cannot be produced. The writer then:
 
-This is not hypothetical. Projected from the sample analysis (not yet a measured run), the combination of Q-WEAK-VERIFY = No and the C.6 rule "a primary account established only by a workflow candidate is an unresolved required resource" holds **at least 6 of the 32 public samples**: case_01, 02, 04, 07, 08, 10. Their primary accounts have no grounded link in participant-visible evidence. Evaluation cases with the same pattern are expected but not yet counted.
+1. writes `runs/<ts>/staging_output.csv` and `runs/<ts>/held_report.md`;
+2. exits non-zero;
+3. leaves any existing root `output.csv` untouched and flags it as stale (F.3.2).
 
-Handling until authorization:
+Projected from the analysis, not a measured run, at least case_01, 02, 04, 07, 08, 10 (primary account without a grounded link) and case_31 (retention unobserved) will be held. Stage 11 measures the actual list, and X-HELD-MAPPING decides the next step.
 
-1. **Run behaviour.** The pipeline writes all non-held rows to a staging file under `runs/`. It writes the root `output.csv` **only** when the held count is 0. Otherwise it exits non-zero and prints the held cases with reasons. No partial or padded `output.csv` is produced.
-2. **Reporting.** The held count, the reasons per case (`REQUIRED_RESOURCE_UNRESOLVED`, `UNSURE_INTENT`, `IDENTITY_UNRESOLVED`, `POLICY_GAP`, `RETAINED_RECORD_MISSING`, `CATEGORY_AMBIGUOUS`, `ERROR`), and the evidence gaps are listed in the run summary and in `evaluation_report.md`.
-3. **Escalation.** Before the final submission run, the user is presented with the held-case list and decides one of the following:
-   - (a) authorize an explicit, documented mapping policy for each reason class;
-   - (b) authorize additional evidence work, e.g. the media cache for PNG-only links;
-   - (c) accept that `output.csv` cannot be generated.
+#### A.8.4 Canonical reason codes
 
-   No option is applied without that authorization. The output schema is never changed.
+Defined once in `errors.py`. Sections B–G use only these names.
 
-#### A.8.4 Plan text not yet aligned with these decisions
+| Kind | Codes |
+|---|---|
+| Held reasons (case level) | `UNSURE_INTENT`, `IDENTITY_UNRESOLVED`, `IDENTITY_AMBIGUOUS`, `REQUIRED_RESOURCE_UNRESOLVED`, `VERIFICATION_SET_INCOMPLETE`, `RETAINED_RECORD_MISSING`, `SYSTEM_AMBIGUOUS`, `VALIDATION_FAILED`, `ERROR`, `INTERNAL_INCONSISTENCY` |
+| Uncertainty reasons (resource level, verdict UNKNOWN) | `NO_ADMISSIBLE_OBSERVATION`, `CLAIMS_ONLY`, `POST_CUTOFF_ONLY`, `OBSERVED_AFTER_CAPTURE`, `NONQUALIFYING_OMISSION`, `EVIDENCE_GAP`, `CONFLICTING_OBSERVATIONS`, `CATEGORY_AMBIGUOUS`, `CATEGORY_UNGROUNDED`, `CONDITION_UNKNOWN`, `POLICY_GAP`, `FIELD_COVERAGE_INCOMPLETE`, `LABEL_ONLY`, `PROOF_NOT_SINGLE_OBSERVATION` |
+| Scope codes | `GROUNDED_DIRECT`, `GROUNDED_TRACE`, `GROUNDED_FK`, `CATALOG`, `CONTAINS_SUBJECT_PII`, `SHARED_RESOURCE`, `OWNERSHIP_CHANGED`, `CATALOG_CONTRADICTED`, `LINKED_TO_OTHER_SUBJECT`, `EARLIER_EPISODE`, `WEAK_LINK_ONLY`, `AMBIGUOUS_WORKFLOW` |
+| Report notes | `DEPENDENCY_ORDER_CONFLICT`, `RESOLVED_BY_QUALITY`, `TREATMENT_EQUIVALENT`, `HISTORICAL_VALUE_AFTER_CHANGE`, `PRE_ASSOCIATION_HIT`, `LINK_EVIDENCE_POST_CUTOFF`, `PHONE_UNCANONICAL`, `HASH_UNVERIFIED`, `AMBIGUOUS_IDENTIFIER` |
+| Retired | `CITATION_UNSUPPORTED` (replaced by `PROOF_NOT_SINGLE_OBSERVATION`, Q-SPLIT-PROOF); `RETENTION_CONDITION_UNKNOWN` (replaced by `CONDITION_UNKNOWN`) |
 
-These passages predate the decisions above. They will be updated during the cross-section alignment pass. **They were not edited in this revision.**
+### A.9 Alignment status
 
-| Location | Current text | Should reflect |
-|---|---|---|
-| C.6 | "Whether a compliant workflow candidate may appear as a verification step … is decision Q-WEAK-VERIFY. Default: not emitted." | Decided **No** (A.8.1) |
-| C.7, B.4.1 | `late_inner_linking` "default is decided under Q-LATE-LINK" | Decided **Yes, link-only** |
-| B.1.3 | "Choosing the provider, model and key is a user decision (Q-MEDIA-PROVIDER)" | OpenAI preferred, with the two preconditions |
-| B.2 layout table | `docs/` "Inclusion is Q-DOCS-ZIP" | Excluded; repository-only |
-| A.4.5, B.3 diagram, B.3.3 | "held … written to `output.csv` only after an explicit, documented decision" | Add the A.8.3 run behaviour (staging file, non-zero exit, escalation) |
-| A.9, B.8, C.9, D.6 | Lists of pending cross-section alignments | Unchanged; still pending |
-| I (R1, R3, R16, R17) and J | Older risk and gate wording | Reference A.8.1 decisions and the A.8.3 blocking gate |
+The cross-section alignment pass was completed on 2026-10-25 after the A.8.1 decisions. Where sections overlap, the authoritative locations are:
 
-### A.9 Required alignment of Sections B–J (not yet edited)
+| Topic | Authoritative location |
+|---|---|
+| Decisions | A.8.1 |
+| Reason codes | A.8.4 |
+| Completeness gate | E.4.2 (A.4.5 summarises) |
+| Verification set | E.5 |
+| Citation rules | F.2 |
+| Validator | F.4 (A.5 summarises) |
+| Writer and held path | F.3.2 |
+| Roadmap | H |
+| Risks | I |
+| Readiness | J |
 
-Section A now overrides the following statements in later sections. They must be updated before implementation of the affected module:
+The per-section "alignment needed" lists (B.8, C.9, D.6, E.8, F.6, G.6) have been closed. The contradiction check done after the pass is recorded in A.9.1.
 
-- **F.2** "If a COMPLETE-case resource has no citable proof, it is omitted from the steps and logged" conflicts with A.4.5. Replace with the completeness gate.
-- **E** pseudocode, COMPLETE branch: apply `gate()`. Use the verdicts from A.4.2 and the retained-record table in A.4.3.
-- **F.3** "[UNRESOLVED] sorted by `case_id`": replace with the A.2.1 decision.
-- **F.4** validator: replace with layers L1–L4 (A.5).
-- **B.2/B.5**: `config.py` holds `OPERATIONS` and `TREATMENTS` as the single source (A.3). M9 consumes internal case results for L3/L4.
-- **D.3** "Retained record missing" and the security-audit/legal-hold bullets: align with A.4.3.
-- **G.3** anti-leakage rules: align with the A.1.2 tests.
-- **I**: update R14 (Q-RETAIN), R17 (decided), R18 (decided). Add Q-UNDETERMINED and Q-DEP.
-- **J**: add the gate check (no undecided `UNDETERMINED` cases), the L3/L4 validator pass, and the privacy scans from A.7.3.
+#### A.9.1 Post-alignment contradiction check
+
+The full document was searched for stale decision wording, retired codes, conflicting gate logic, and stage numbering. Results:
+
+- **Resolved during the pass:**
+  - A.4.3 vs Q-RETAIN: retained-record table rows aligned.
+  - A.4.5 vs E.4.2: the gate now refers to E.4.2.
+  - B.1.4 vs E.1.2: an explicit negation no longer wins automatically.
+  - B.4.3 "listed as a future check in INCOMPLETE" vs E.4.2: an UNKNOWN member now holds the case.
+  - E.4.2: `RETAINED_RECORD_MISSING` now holds even with other violations.
+  - D.3.3 rule 1 (combined slots) vs Q-SPLIT-PROOF: single observation now required.
+  - F.2.1 `VERIFY_RECORD_PRESENT` condition source aligned.
+- **Remaining (cannot be resolved inside the plan):** only the A.8.2 items and the A.8.3 run-level conflict. Neither is a contradiction between sections; both depend on external approval or on run results.
 
 ---
 
@@ -480,7 +496,7 @@ Decision:
 - `evidence/pdf_parser.py` implements this extractor. **No `pypdf` dependency.**
 - The parser reports failure instead of guessing if a PDF uses an unsupported structure: other filters, hex/`TJ`-array text, or multi-byte CMaps. Future evidence would then show up as a coverage gap (B.3.2), not as silently missing data.
 
-#### B.1.3 PNG extraction: approach decided, provider pending
+#### B.1.3 PNG extraction: approach decided, transmission not authorized
 
 [FACT] The 11 PNGs contain only `IHDR/IDAT/IEND` chunks, with no embedded text metadata. No OCR engine or image library is installed. Their content therefore requires OCR or a vision model.
 
@@ -511,9 +527,9 @@ Rules:
   - It re-hashes each PNG and compares it to the cached `sha256`.
   - A mismatch, a missing entry, or an unknown `schema_version` makes that file `EXTRACTION_FAILED` in the coverage report (B.3.2). It is never treated as an empty file.
 - **No manual transcription into the cache.** Human review may mark entries `spot_checked` and record discrepancies. Corrections are made by re-running extraction with a revised prompt, never by editing values.
-- **Provider and data-sharing approval.** The extraction sends dataset screenshots to an external service. Choosing the provider, model and key is a **user decision (Q-MEDIA-PROVIDER)**. The screenshots are fictional data, but sending data outward still needs approval.
+- **Provider and data-sharing approval (A.8.1 Q-MEDIA-PROVIDER).** OpenAI is the preferred provider. **Transmission of the screenshots is not authorized**, and no vision API call is made. Before the final run, the available vision-capable models are reported and explicit approval is requested (X-MEDIA-TRANSMISSION).
   - The `openai` SDK is already installed [FACT]. A different provider needs its SDK installed, which also needs approval.
-- **Gate.** The core pipeline (Stages 0–10) is built and evaluated without image facts. [FACT] No expected public-sample step cites a PNG, and every sample resource that appears in a PNG also appears in text evidence or activity rows.
+- **Gate.** The core pipeline (Stages 0–11) is built and evaluated without image facts. [FACT] No expected public-sample step cites a PNG, and every sample resource that appears in a PNG also appears in text evidence or activity rows.
 
   However, the PNGs contain grounded links for **evaluation** subjects: `user_11`, `user_13`, `user_14`, `user_16`, `user_18`, `user_20`, `user_22`, `user_03`, `user_17`, and `marketing_001`. Therefore:
   - the media cache is **required before the final 518-case run** (readiness checklist J);
@@ -526,17 +542,17 @@ The intent classifier returns one of three results, never a bare boolean:
 | Result | Trigger (deterministic) | Recorded |
 |---|---|---|
 | `DELETION` | ≥1 deletion-intent pattern (delete / erase / remove / close + account / personal data; multilingual equivalents) **and** no explicit non-deletion pattern | matched phrases |
-| `NON_DELETION` | ≥1 explicit non-deletion pattern: an explicit negation of deletion ("not asking for deletion", "don't delete", "do not close", "not a request to erase", "without removing"), a limiting "only" clause, or a stated non-deletion purpose (correct, change, copy, download, information held, stop promotional, reset login) | matched phrases |
+| `NON_DELETION` | Determined by the clause-scoped rules of **E.1.1–E.1.2**. A bare "only" or purpose word never decides alone. | matched clauses |
 | `UNSURE` | Neither pattern class matched, **both** classes matched in a way the precedence rules below do not resolve, or the text contains a script or language with no pattern coverage | reason |
 
 Precedence:
 
-- An explicit negation of deletion always wins over a deletion verb. "Remove me from marketing lists only" → `NON_DELETION`.
+- Precedence is defined in E.1.2. A deletion request plus a deletion negation gives `UNSURE`. A negation scoped to a subset ("not my orders") is a `SCOPE_LIMIT`, not a negation of deletion. "Remove me from marketing lists only" → `NON_DELETION` (`MARKETING_ONLY`).
 - A limitation that keeps something ("you may keep backups", "keeping an internal reference is fine") does **not** negate deletion. [FACT: such wording appears in samples case_04, 17, 23, 31.]
 
 LLM fallback:
 
-- It is called **only** for `UNSURE`, and only if `AUDIT_LLM_ENABLED=1` and an API key is present in the environment.
+- It is called **only** for `UNSURE`, and only if `AUDIT_LLM_ENABLED=1` and an API key is present. **Default `AUDIT_LLM_ENABLED=0`** (A.8.1 Q-INTENT-LLM); no LLM call happens unless separately authorized.
 - The result is cached in `code/llm_cache/intent/<sha256(text)>.json`. The cache stores the model, prompt hash, raw answer and token counts, and is counted in `usage_report.md`.
 
 If the fallback is unavailable (disabled, no key, error):
@@ -565,7 +581,7 @@ The modular design is kept. Each directory below has exactly one role.
 | `code/tests/` | Tests | yes | developer | no |
 | `runs/` (repo root, git-ignored) | **Scratch run artifacts**: explain traces, coverage reports, run summaries | **no** (contain dataset identifiers, A.7.3) | pipeline | no |
 | `output.csv` (repo root) | **Submission artifact** | separate upload | pipeline | no |
-| `docs/IMPLEMENTATION_PLAN.md` | Planning document | **not by default.** The README zip command packs only `README.md` and `code` [FACT]. Inclusion is **Q-DOCS-ZIP**. | developer | no |
+| `docs/IMPLEMENTATION_PLAN.md` | Planning document | **no** (A.8.1 Q-DOCS-ZIP; repository-only) | developer | no |
 | `dataset/` | Challenge input | **never** [REQ] | organizers | yes (read-only) |
 
 Import rules, enforced by a test:
@@ -736,7 +752,10 @@ Recommended fix:
 | Grounded observation contradicts a catalog claim (`LINK_RESOURCE_IDENTITY`) | M5 | Grounded wins; conflict logged | Normal |
 | Category ambiguous across treatments | M4 | `UNKNOWN(CATEGORY_AMBIGUOUS)` | No finding (the operation cannot be chosen); blocks COMPLETE |
 | Exception inside one case | M7 wrapper | Case result `ERROR` + traceback in `runs/` | Held; the final run requires zero errors |
-| Validator L1–L4 failure | M9 | Case moved to held list with the failing rule | Held |
+| Validator L1–L4 failure | M9 | Case moved to held list with the failing rule | Held `VALIDATION_FAILED` |
+| Conflicting explicit owner systems for a resource | M8 (F.1.3) | `SYSTEM_AMBIGUOUS` | Held |
+| Required retained record proven absent | M6/M7 | `RETAINED_RECORD_MISSING` | Held, even with other findings (Q-RETAIN) |
+| State provable only by combining observations | M6 | `UNKNOWN(PROOF_NOT_SINGLE_OBSERVATION)` | Held via the gate (Q-SPLIT-PROOF) |
 
 ### B.4 Core data model
 
@@ -816,7 +835,7 @@ Defined once in `errors.py`.
 
 | Reason | Meaning | Verdict | Finding? | Effect on case |
 |---|---|---|---|---|
-| `NO_ADMISSIBLE_OBSERVATION` | No observation admissible for state | UNKNOWN | no | Blocks COMPLETE; listed as a future check in INCOMPLETE |
+| `NO_ADMISSIBLE_OBSERVATION` | No observation admissible for state | UNKNOWN | no | Blocks COMPLETE **and** INCOMPLETE emission; the case is held (E.4.2) |
 | `CLAIMS_ONLY` | Only activities / `reported_status` | UNKNOWN | no | as above |
 | `POST_CUTOFF_ONLY` | Evidence exists only after `audit_at` | UNKNOWN | no | as above |
 | `OBSERVED_AFTER_CAPTURE` | The only relevant observation is dated after its file capture and after `audit_at` | UNKNOWN | no | as above |
@@ -824,16 +843,17 @@ Defined once in `errors.py`.
 | `EVIDENCE_GAP` | Relevant file FAILED/PARTIAL | UNKNOWN | no | as above; also run-level gate |
 | `CONFLICTING_OBSERVATIONS` | Same time, different states | UNKNOWN | no | as above |
 | `CATEGORY_AMBIGUOUS` | Treatment cannot be chosen | UNKNOWN | no | as above |
-| `RETENTION_CONDITION_UNKNOWN` | Retention field not observed | UNKNOWN | no | as above |
-| `RETAINED_RECORD_MISSING` | Required retained record proven absent | VIOLATION_PROVEN | **no operation exists** | Blocks COMPLETE; case held unless other findings make it INCOMPLETE; reported (Q-RETAIN) |
-| `WEAK_LINK_ONLY` | Workflow-correlation link only (C.6) | not in `REQ(case)` | no | Logged as unresolved scope; does not block COMPLETE (A.4.5) |
+| `CONDITION_UNKNOWN` | Rule condition field not observed (e.g. `retention_until`) | UNKNOWN | no | as above (Q-RETENTION-UNOBSERVED strict) |
+| `POLICY_GAP` | Rule condition FALSE and no alternative rule (D.2.4) | UNKNOWN | no | as above |
+| `CATEGORY_UNGROUNDED` | Only prefix/workflow signals for category | UNKNOWN | no | as above |
+| `FIELD_COVERAGE_INCOMPLETE` | A required identifier slot was not observed | UNKNOWN | no | as above |
+| `LABEL_ONLY` | Status label without field evidence | UNKNOWN | no | as above |
+| `PROOF_NOT_SINGLE_OBSERVATION` | Compliant state provable only by combining observations | UNKNOWN | no | as above (Q-SPLIT-PROOF) |
+| `RETAINED_RECORD_MISSING` | Required retained record proven absent | VIOLATION_PROVEN | **no operation exists** | The case is **always held** (Q-RETAIN) |
+| `WEAK_LINK_ONLY` | Workflow-correlation link only (C.6) | not in `REQ(case)` | no | No step (Q-WEAK-VERIFY = No). The case is held if it is the primary account's only basis or shows a violation (C.6 a/b). |
 | `IDENTITY_UNRESOLVED` | Case-level | — | — | B.3.3 row |
 
-The case decision (M7) follows A.4.5:
-
-- any expressible `VIOLATION_PROVEN` → INCOMPLETE;
-- else all of `REQ(case)` COMPLIANT_PROVEN with a citation → COMPLETE;
-- else UNDETERMINED (held).
+The case decision (M7) follows **E.4.2**. All codes are registered in A.8.4.
 
 ### B.5 Module contracts
 
@@ -846,7 +866,7 @@ The case decision (M7) follows A.4.5:
 | M5 | `scope.py` | Which resources belong to the case; admissibility per ref | subject, index, activities, coverage, all requests → `ScopeDecision` per candidate | **Every candidate gets an include/exclude decision** with reason codes: `GROUNDED_DIRECT`, `GROUNDED_TRACE`, `GROUNDED_FK`, `CATALOG`, `WEAK_LINK_ONLY`, `SHARED_RESOURCE`, `LINKED_TO_OTHER_SUBJECT`, `EARLIER_EPISODE`, `LINK_EVIDENCE_POST_CUTOFF`, `AMBIGUOUS_WORKFLOW`. Each code comes with `EvidenceRef`s. Excluded candidates are kept in the explain trace. |
 | M6 | `state.py` | Per-dimension conclusions and verdict | scope, index, coverage, `TREATMENTS` → `ResourceAssessment[]` | **Evidence-completeness check per resource.** A compliant verdict requires PROOF refs admissible for state and citation, and no `EVIDENCE_GAP` on the dimension. UNKNOWN is never upgraded to compliant (A.4.2). |
 | M7 | `decision.py`, `intent.py` | Intent + completeness gate | intent, assessments → `CaseDecision{status ∈ {COMPLETE, INCOMPLETE, NOT_APPLICABLE} \| held(reason)}` | **Conservative rules:** only the A.4.5 gate. UNDETERMINED / UNSURE / ERROR become held, never mapped to an enum implicitly. Each emitted status lists the verdicts that justify it. |
-| M8 | `steps.py` | Steps from `TREATMENTS`; citation choice | `CaseDecision` → `Step[]` | **Citation relevance:** the chosen ref must be in `verdict.proof`, admissible for citation, name the resource (or be its qualifying omission snapshot), and support the step's state. Otherwise the step is not emitted and the case is held (`CITATION_UNSUPPORTED`). |
+| M8 | `steps.py` | Steps from `TREATMENTS`; citation choice | `CaseDecision` → `Step[]` | **Citation relevance:** the chosen ref must be in `verdict.proof`, admissible for citation, name the resource (or be its qualifying omission snapshot), and support the step's state. A state provable only by combining observations is already `UNKNOWN(PROOF_NOT_SINGLE_OBSERVATION)` (Q-SPLIT-PROOF), so the gate holds the case before M8. |
 | M9 | `serializer.py` | CSV/JSON writing; L1–L4 validation | case results + `output.csv` → errors | **Semantic checks** L3/L4 (A.5) use the internal case results. Writes `output.csv` only when there are zero errors and zero undecided held cases. |
 | M10 | `runlog.py` (runtime), `code/evaluation/main.py` (evaluation) | Explain trace, coverage report, usage counters; sample scoring, report generation | results → `runs/<ts>/…`; evaluator → `code/evaluation/*.md` | **Strict separation:** the runtime part never reads `sample_output.csv`. The evaluator imports production code but not vice versa (import-rule test, B.2). Reference answers are read only inside the evaluator; feature flags are set by documented decisions, not by evaluator output at run time (A.1.2). |
 
@@ -880,15 +900,9 @@ M1 referential and consistency checks:
 | B.4 mixed state; single `state_obs`; underspecified `compliant` | B.4.2, B.4.1, B.4.3 |
 | B.5 per-module contract fixes M1–M10 | B.5 |
 
-### B.8 Alignment needed in later sections (not edited in this revision)
+### B.8 Alignment status
 
-- **C.1:** the PDF row becomes "standard-library extractor (B.1.2)". The media option list (M1 `pypdf` / M2 vision) is replaced by B.1.2–B.1.3. The cache path moves from `code/evaluation/media_extractions.md` to `code/media_cache/`.
-- **C.5/C.6:** use the M5 reason codes. "Other-subject exclusion" applies only when the resource is not also grounded to this subject (`SHARED_RESOURCE`).
-- **E:** pseudocode must use `ResourceAssessment` dimensions, `Verdict`, the held path and the B.3.1 intent handling.
-- **F.2:** citation choice reads `verdict.proof` and `verdict.citation`.
-- **G:** add tests for `ExtractionReport` effects, B.3.3 rows, import rules, and media cache hash mismatch.
-- **H:** add a "PDF stdlib extractor" stage. Media cache generation stays after Stage 10, but becomes a precondition of Stage 13.
-- **I/J:** add Q-MEDIA-PROVIDER and Q-DOCS-ZIP, the held-cases gate, and the coverage gate.
+Aligned with A.8.1 on 2026-10-25 (A.9). Section B now reflects Q-MEDIA-PROVIDER (B.1.3), Q-INTENT-LLM (B.1.4), Q-DOCS-ZIP (B.2) and the A.8.4 reason codes (B.3.3, B.4.3).
 
 ---
 
@@ -1018,7 +1032,7 @@ resolve(request_email):
 
 - `UnresolvedSubject` and `AmbiguousSubject` never produce a COMPLETE answer: the primary account cannot be proven, so the A.4.5 gate fails. The case is **held** with reason `IDENTITY_UNRESOLVED` / `IDENTITY_AMBIGUOUS`.
 - If intent is `NON_DELETION`, the output is `NOT_APPLICABLE`, `[]`. Identity is irrelevant to that output.
-- Otherwise the final mapping falls under Q-UNDETERMINED (A.8). Until it is decided, the readiness gate (J) blocks final generation.
+- Otherwise the case is held (A.8.1 Q-UNDETERMINED). It is reported at Stage 11, and any mapping requires X-HELD-MAPPING.
 - Findings may still be computed for diagnostics, using only `RECORD_FIELD` hits on the request email/hash.
 - [FACT] 0 such cases in current inputs: 518/518 and 32/32 resolve to exactly one user (418 current, 100 historical; samples 29 current, 3 historical).
 
@@ -1115,12 +1129,12 @@ global_candidates(all cases):                         # computed over all 550 in
   - **(a) Primary account not established by a C.5 link.** The account is required (A.4.5), and if its only basis is a `WORKFLOW_CANDIDATE`, it is unresolved and the gate fails: the case is held with `REQUIRED_RESOURCE_UNRESOLVED`.
   - **(b) Workflow candidates with a proven violating state.** A candidate whose admissible evidence shows a violation could be the subject's prohibited data. The case cannot be COMPLETE and is held.
   - **(c) Workflow candidates with compliant or unknown state.** These do not block, because no evidence ties them to the subject. They are listed in the case's unresolved-scope report.
-- Whether a compliant workflow candidate may appear as a **verification step** is an identity claim. It is decision **Q-WEAK-VERIFY**. Default: not emitted.
+- **Decided (A.8.1 Q-WEAK-VERIFY = No):** a workflow candidate never appears in any step.
 - **Impact on samples** (to be measured, not assumed):
   - Rule (a) holds the six handcrafted-style sample cases whose primary account has no C.5 link: case_01, 02, 04, 07, 08, 10.
-  - The Q-WEAK-VERIFY default omits the anonymised-analytics verification step in case_03, 21, 25–28.
+  - Q-WEAK-VERIFY = No omits the anonymised-analytics verification step in case_03, 21, 25–28.
 
-  These are expected public-sample losses of the conservative default. They are reported, and resolving them requires a user decision, not a silent heuristic.
+  These are expected public-sample losses of the decided conservative rules. They are measured at Stage 10–11 and are not tuned away (G.3.3).
 
 ### C.7 Admissibility and cutoff (corrected)
 
@@ -1169,7 +1183,7 @@ Activities are admissible as claims only if `event_time <= audit_at`. Activity t
 4. Validator L3 independently re-checks `file_captured_at <= audit_at` for every cited ID.
 5. A test asserts that no `Conclusion.evidence` with role `PROOF` has `"state"` missing from `admissible`.
 
-`late_inner_linking` stays a flag. Its default is decided under Q-LATE-LINK (A.8).
+`late_inner_linking` is enabled for **linking only** (A.8.1 Q-LATE-LINK). It never affects `admissible_for_state` or `admissible_for_citation`.
 
 **Tests (`test_admissibility.py`)**, each against all three functions:
 
@@ -1247,22 +1261,11 @@ existence_by_omission(R, case):
 
 - [FACT for the probe] Coverage-first matches 4/4. Latest-of-any-level matches 3/4.
 - [ASSUMPTION] Ranking collection-level above system-level is justified independently of the samples: a system-level scope does not state which collections or copies were captured in full.
-- It remains a hypothesis to re-test at Stage 9. If later evidence contradicts it, the rule is revised in `config.py` (one place), not patched per case.
+- It remains a hypothesis to re-test in Stage 7 unit tests and the Stage 10 evaluation. If later evidence contradicts it, the rule is revised in `config.py` (one place), not patched per case.
 
-### C.9 Alignment with other sections
+### C.9 Alignment status
 
-- **B.4.1 `EvidenceRef.admissible`** must be computed with the C.7 functions above.
-- **E pseudocode** must use:
-  - the C.5.3 rules (I1–I5, E1–E3);
-  - C.6 unresolved-required-resource checks (a)/(b);
-  - C.8.2 for existence.
-- **F.2** citation for omission = `S.file_id` from C.8.2.
-- **G** gains:
-  - `test_provenance.py` (C.2) and `test_admissibility.py` (C.7);
-  - relationship-type tests (C.5.2), including `QUERY_KEY_ONLY` and trace-key override;
-  - coverage-unit tests (C.8.1);
-  - the C.8.2 four-case oracle.
-- **I/A.8** gain **Q-WEAK-VERIFY** and the conservative-default sample impact (C.6).
+Aligned with A.8.1 on 2026-10-25 (A.9). Q-WEAK-VERIFY, Q-LATE-LINK and the unresolved-identity output rule are now decided. C.7's functions are the source for B.4.1 `EvidenceRef.admissible`, F.2.1 check 2 and G.1 admissibility tests.
 
 ---
 
@@ -1399,7 +1402,8 @@ Missing or conflicting condition evidence:
 - **Field not observed** → `UNKNOWN(CONDITION_UNKNOWN)`.
 - **Two admissible observations at the same observation time disagree** → `UNKNOWN(CONFLICTING_OBSERVATIONS)`.
 - **Different times** → the latest admissible value wins, and the earlier ones are recorded as `SUPERSEDED`.
-- Indicator lists (rule_05 context indicators, rule_14 default) are [ASSUMPTION]s. They are listed in `CONDITIONS` with that label.
+- Indicator lists (rule_05 context indicators, rule_14 default) are [ASSUMPTION]s, provisionally approved under Q-D-ASSUMPTIONS (b)–(c). They are listed in `CONDITIONS` with that label and have edge tests.
+- **Single-observation rule (Q-SPLIT-PROOF).** For a COMPLETE proof, the condition evidence (e.g. `retention_until`) must be in the **same** observation as the presence proof. Otherwise the result is `UNKNOWN(PROOF_NOT_SINGLE_OBSERVATION)`.
 
 #### D.2.4 When a condition is FALSE or UNKNOWN
 
@@ -1464,11 +1468,11 @@ So **missing ≠ null**.
 
 Rules:
 
-1. **ANONYMIZED (compliant).** Every slot is `CLEARED`, using the latest admissible observation per slot, with no later observation `POPULATED`. Slots may be proven by different observations of the same resource, provided none is superseded by a later populated value.
+1. **ANONYMIZED (compliant).** A **single admissible observation** shows every slot `CLEARED`, and no later admissible observation shows any slot `POPULATED`. Slots proven only by **different** observations give `UNKNOWN(PROOF_NOT_SINGLE_OBSERVATION)` (A.8.1 Q-SPLIT-PROOF).
 2. **EXPOSED (violation).** Any slot is `POPULATED` with a value associated with the subject (C.4) in the latest admissible observation for that slot. A populated value belonging to someone else is a C.5 conflict, not exposure of this subject.
 3. **Field-level evidence outranks labels.** A result label `ANONYMIZED` in an observation where any slot is `POPULATED` is recorded as `CONTRARY` evidence, and rule 2 applies. [FACT: 0 such contradictions in current data.]
-4. **Label with field context.** The handover form `ANALYTICS_PROFILE | ANONYMIZED | no direct identifier` states the identifier column's observed value, so it counts as all slots `CLEARED` for that observation [ASSUMPTION]. A bare label with no field context is `UNKNOWN(LABEL_ONLY)`.
-5. Any slot still `NOT_OBSERVED` after combining observations → `UNKNOWN(FIELD_COVERAGE_INCOMPLETE)`.
+4. **Label with field context [ASSUMPTION, Q-D-ASSUMPTIONS (d)].** The handover form `ANALYTICS_PROFILE | ANONYMIZED | no direct identifier` counts as all slots `CLEARED` **only for the record on that line, and only because the line explicitly states "no direct identifier"**. A missing field is never proof. A bare label without such a statement is `UNKNOWN(LABEL_ONLY)`.
+5. Any slot `NOT_OBSERVED` in the proving observation → `UNKNOWN(FIELD_COVERAGE_INCOMPLETE)`.
 
 Check against the public samples' anonymised analytics:
 
@@ -1594,8 +1598,8 @@ Applies to:
 
 1. No new operation, phase or state is invented [REQ: AGENTS §6.4].
 2. The case **cannot be COMPLETE**: a required retained record is not available [REQ: A.4.1].
-3. If the case has other expressible findings, it is `INCOMPLETE` with those findings. Whether its verification phase should include `VERIFY_RECORD_PRESENT` for the missing record is part of Q-RETAIN: listing it would be a check that no listed remediation can satisfy.
-4. If the case has **no** other expressible finding, the permitted schema cannot faithfully express it. The case is **held** with `RETAINED_RECORD_MISSING`, and final output generation is blocked until the user decides (**Q-RETAIN**). It is never silently emitted as COMPLETE.
+3. **Decided (A.8.1 Q-RETAIN):** the case is **held** with `RETAINED_RECORD_MISSING` **even if other expressible findings exist**. No `VERIFY_RECORD_PRESENT` is emitted for a record proven absent.
+4. The reason, the absence proof and the affected record are written to the explain trace and the held report. The case is never emitted as COMPLETE or INCOMPLETE.
 
 [FACT] No retained record proven absent has been observed in public samples, so this path is not yet exercised.
 
@@ -1673,23 +1677,9 @@ Claims may create edges because edges affect only ordering validation, never sco
 | No new operations, phases or states | D.2.2, D.3.9; all outputs use A.3.1 rows only |
 | Identity, category, policy and state kept separate | D intro table, D.1.3 rule 3 |
 
-### D.6 Contradictions that remain outside Section D (not edited)
+### D.6 Alignment status
 
-Section D is consistent with the revised A.3.2, A.4.2–A.4.5, B.4 and C.5–C.8. The following statements elsewhere still conflict with it or are incomplete. **The full plan is not yet consistent** until they are revised:
-
-| Location | Conflict / gap |
-|---|---|
-| B.4.3 uncertainty list | Missing `POLICY_GAP`, `CONDITION_UNKNOWN`, `FIELD_COVERAGE_INCOMPLETE`, `LABEL_ONLY`, `CATEGORY_UNGROUNDED`, `DEPENDENCY_ORDER_CONFLICT` (a report code, not a verdict reason) |
-| B.5 M4 confidence rule | States that content/workflow classification is accepted when all competing categories share a chain. D.1.2–D.1.3 refines this: tiers, T-WF only as a constrained tie-breaker. B.5 should reference D.1. |
-| A.3.2 `TREATMENTS` | Needs the `source="SUPPLEMENTAL"` marker for DATA_FLOW and the `CONDITIONS` companion table reference (D.2.1–D.2.2) |
-| A.4.3 retained-record table | FALSE condition is described as "not a retained record … no step; logged". D.2.4 makes it `UNKNOWN(POLICY_GAP)` that **blocks COMPLETE**. A.4.3 must be aligned. |
-| A.8 open questions | Add Q-RETENTION-EXPIRED, Q-HOLD-EXPIRED. Q-RETAIN now also covers tombstone reference loss and the verification-step question (D.3.9 item 3). |
-| E (decision pseudocode) | Still uses the old single `state` / `UNOBSERVED` model. It must use D.1 `classify`, D.2.3 conditions, D.2.4, and the D.3.9 held path. |
-| F.2 / F.4 | Citation for condition-dependent verdicts must cite the observation proving both the state and, where relevant, the condition (e.g. `retention_until`). L4 must include D.4 edge checks and the prohibited-action list. |
-| G | Add D.1 tier/conflict tests, D.2.3 condition tests (TRUE/FALSE/UNKNOWN each), D.3.3 slot tests, D.3.6 signal-conflict tests, D.4.3 tests |
-| H | No stage yet for the `CONDITIONS` table and dependency edges |
-| I | R7 (support category) and R8 (contact lookup) should reference D.3.1. R15 (expired retention) should reference D.3.4/D.3.5. R20 (`RESTORE_BACKUP`) should reference D.3.7. Add Q-RETENTION-EXPIRED and Q-HOLD-EXPIRED. |
-| J | Add: no held `POLICY_GAP` / `RETAINED_RECORD_MISSING` / `CATEGORY_AMBIGUOUS` cases without a decision; zero L4 dependency-rule violations |
+Aligned with A.8.1 on 2026-10-25 (A.9). The decisions now applied here are Q-SPLIT-PROOF (D.3.3 rule 1), Q-RETAIN (D.3.9), Q-RETENTION-EXPIRED (D.3.4), Q-HOLD-EXPIRED (D.3.5), Q-DEP (D.4.2) and Q-D-ASSUMPTIONS (D.2.3, D.3.1, D.3.3 rule 4). New reason codes are registered in A.8.4.
 
 ---
 
@@ -1791,7 +1781,7 @@ Two candidate modes:
 - `prior_request`: links observed after the `audit_at` of the subject's latest earlier request belong to this case.
 - `requested_at`: only links observed at or after this request's `requested_at` belong to this case.
 
-**Proposed default: `prior_request`** [PROPOSAL, pending user confirmation as **Q-EPISODE**]. The reasoning comes from the requirements and evidence, not from sample scores:
+**Decided: `prior_request`** (A.8.1 Q-EPISODE). The reasoning comes from the requirements and evidence, not from sample scores:
 
 1. A deletion request covers the subject's personal data that exists at the time of the request. An observation's date is when a system *looked*, not when the data was created. Under `requested_at`, an export observed in June and never re-observed would drop out of an August request. That would be under-reporting, contrary to AGENTS §6.5 ("report every relevant policy violation").
 2. Resources observed before an earlier request's `audit_at` were within that earlier case's audit. Re-auditing them under a later case mixes two episodes.
@@ -1894,11 +1884,11 @@ Rules for these sets:
 decide(intent, sets):
   if intent == NON_DELETION:                        return emit(NOT_APPLICABLE, [])
   if intent == UNSURE:                              return hold(UNSURE_INTENT)
+  if sets.UNEXPRESSIBLE:                            return hold(RETAINED_RECORD_MISSING)       # Q-RETAIN: always held
   if sets.VIOLATING:
-      if sets.UNRESOLVED:                           return hold(VERIFICATION_SET_INCOMPLETE)   # E.5
+      if sets.UNRESOLVED:                           return hold(VERIFICATION_SET_INCOMPLETE)   # Q5 / E.5
       return emit(INCOMPLETE, findings+remediation+verification)                # E.5, F
   # no expressible violation
-  if sets.UNEXPRESSIBLE:                            return hold(RETAINED_RECORD_MISSING)       # D.3.9, Q-RETAIN
   if sets.WF_VIOLATING:                             return hold(REQUIRED_RESOURCE_UNRESOLVED)  # C.6 (b)
   if sets.UNRESOLVED:                               return hold(REQUIRED_RESOURCE_UNRESOLVED | <reasons>)
   if REQ == PROVEN_OK:                              return emit(COMPLETE, cited verification)
@@ -1920,7 +1910,7 @@ In the five-resource example (four proven compliant, marketing profile UNKNOWN),
 - ≥1 expressible proven violation;
 - **every** `REQ` member has a determinable required final state, so the verification phase can list a check for each (E.5).
 
-If a `REQ` member is UNRESOLVED, the status INCOMPLETE would be true, but the output would omit a required check. The case is therefore held with `VERIFICATION_SET_INCOMPLETE` [PROPOSAL; new held reason, see E.8].
+If a `REQ` member is UNRESOLVED, the status INCOMPLETE would be true, but the output would omit a required check. The case is therefore held with `VERIFICATION_SET_INCOMPLETE` (decided: A.8.1 Q-VERIFICATION-SET-INCOMPLETE).
 
 **NOT_APPLICABLE** only comes from an explicit NON_DELETION intent (E.1.2).
 
@@ -1932,7 +1922,7 @@ The serializer receives only `emit(...)` results. The writer applies the A.8.3 r
 
 - the root `output.csv` is written only when the held count is 0;
 - otherwise the non-held rows go to `runs/<ts>/staging_output.csv`, the run exits non-zero, and the held list is printed;
-- final generation then waits for the user's authorization (A.8.3 options a/b/c).
+- final generation then waits for the user's decision after reviewing the Stage 11 held report (A.8.2 X-HELD-MAPPING).
 
 [FACT, projected from Sections C/A.8, not a measured run] At least case_01, 02, 04, 07, 08, 10 would be held under the current decisions. So this conflict with the 518-row contract is expected to occur.
 
@@ -2010,24 +2000,9 @@ analyze(case, ctx):
    - A CLAIM never supersedes an OBSERVED value.
 6. **Serialization guard.** Any held result reaching the serializer raises. With ≥1 held case, the root `output.csv` is not written and the exit code is non-zero.
 
-### E.8 Contradictions remaining outside Section E (not edited)
+### E.8 Alignment status
 
-The full plan is **not yet consistent**. These passages conflict with Section E and need the alignment pass:
-
-| Location | Conflict / gap |
-|---|---|
-| A.4.5 gate pseudocode | Lacks `VERIFICATION_SET_INCOMPLETE`, `WF_VIOLATING` and the primary-account slot. E.4.2 is the more complete form. |
-| A.8.3 reason list | Add `VERIFICATION_SET_INCOMPLETE`, `INTERNAL_INCONSISTENCY`, `VALIDATION_FAILED`, `IDENTITY_AMBIGUOUS`. Add **Q-EPISODE** to A.8.2. |
-| B.1.4 | Its NON_DELETION trigger list ("a limiting 'only' clause … stated non-deletion purpose") is broader than E.1.1/E.1.2. A bare "only" or a purpose word does not decide without scope. B.1.4 should defer to E.1. |
-| B.3 diagram / B.3.3 / B.4.3 | Add the new held reasons. The B.4.3 uncertainty list still lacks the D.6 reasons. |
-| C.6 | "Default: not emitted" now decided (A.8.1). C.6 (a)/(b) are implemented by E.4.1/E.4.2. |
-| C.7 | `late_inner_linking` default now decided (Yes, link-only). |
-| D.6 | Its listed alignments remain pending. |
-| F.2 / F.3 / F.4 | Must take steps only from `emit()` results. F.3's "failure isolation … conservative row" conflicts with A.8.3/E.4.3 and must be replaced by the held path. F.4 must include the serialization guard. |
-| G | Add the E.7 tests. G.4 edge list partly overlaps. |
-| H | No stage yet for intent clause analysis, set construction, or held-report output. |
-| I | R10 (verification-set membership), R11 (account linkage) and R12 (intent) are superseded by E.5, E.4.1 and E.1. |
-| J | Add the held-count gate and the serialization guard. |
+Aligned with A.8.1 on 2026-10-25 (A.9). E.4.2 is the authoritative gate; A.4.5 summarises it. The decisions now applied here are Q-EPISODE (E.2.2), Q-VERIFICATION-SET-INCOMPLETE and Q-RETAIN (E.4.2), and Q-INTENT-LLM (E.1.2).
 
 ---
 
@@ -2115,7 +2090,7 @@ Precedence, implemented once in `config.SYSTEM_RESOLUTION`:
 | Outcome | Result |
 |---|---|
 | Rule 1 values across admissible observations agree | `system_id` = that value |
-| Rule 1 values disagree | `SYSTEM_AMBIGUOUS` → the case is held (new held reason; F.6) |
+| Rule 1 values disagree | `SYSTEM_AMBIGUOUS` → the case is held (A.8.4) |
 | Rule 1 absent, rule 2 present | `system_id` from the alias, with confidence MEDIUM |
 | Only rule 3 available | `SYSTEM_AMBIGUOUS` → held. A prefix never decides an output field alone, consistent with D.1.1. |
 
@@ -2151,7 +2126,7 @@ What check 5 means for each step type:
 | FINDING `REPORT_ACTIVE_DATA_FLOW` | `enabled=true` or equivalent |
 | FINDING `REPORT_RESTORE_RISK` | A RESTORABLE reading (D.3.6) |
 | `VERIFY_RECORD_ABSENT` | An explicit named negative (A.4.2a), or a qualifying omission (C.8) |
-| `VERIFY_RECORD_PRESENT` | Presence **and** the retention condition TRUE (D.2.3). The cited observation must show `retention_until` / `retained_until`, or another admissible observation must establish the condition. See F.2.3. |
+| `VERIFY_RECORD_PRESENT` | Presence **and** the retention condition TRUE (D.2.3), both shown by the **same** observation (Q-SPLIT-PROOF). Otherwise the state is UNKNOWN and the case is held. |
 | `VERIFY_RECORD_REDACTED` | All prohibited slots CLEARED and the stable reference present (D.3.8). For support messages, requester identifiers CLEARED (D.3.1). |
 | `VERIFY_RECORD_ANONYMIZED` | All four slots CLEARED (D.3.3) |
 | `VERIFY_DATA_FLOW_DISABLED` | `enabled=false` or equivalent |
@@ -2172,8 +2147,8 @@ For omission proofs, the candidate is the single snapshot chosen by C.8.2 (cover
 - A COMPLETE verification step must cite **one** observation that by itself proves the full claimed state.
   - Example: a single analytics observation in which all four slots are CLEARED.
   - Example: a single audit-record observation showing presence and `retention_until`.
-- If the state is proven only by **combining** observations, no single valid citation exists. This is allowed by D.3.3 rule 1 (slots across observations) and D.2.3 (condition from another observation). The resource's verdict stays COMPLIANT for analysis, but the step cannot be cited.
-- In that situation the case is held with `CITATION_UNSUPPORTED`. No partial citation is used. Recorded as **Q-SPLIT-PROOF** (F.6).
+- If the state is establishable only by **combining** observations, the state is `UNKNOWN(PROOF_NOT_SINGLE_OBSERVATION)` already in M6 (D.3.3, D.2.3). The completeness gate then holds the case.
+- **Decided (A.8.1 Q-SPLIT-PROOF, option 2).** No partial citation is ever used. The retired `CITATION_UNSUPPORTED` path is replaced by this UNKNOWN; it does not remove the held outcome.
 
 ### F.3 Serialization and failure handling
 
@@ -2296,42 +2271,19 @@ Any L1–L4 or run-level failure blocks writing the root `output.csv` (F.3.2).
 | Consistent output and validation contract | One `OPERATIONS` / `TREATMENTS` / `ROW_SORT_KEY` source; all-or-nothing writer (F.3.2); L1–L4 + run-level checks (F.4) |
 | Claims never prove state | F.2.1 check 1, F.1.2 proposed-vs-performed rule, L3 |
 
-### F.6 Cross-section contradictions and open items (not edited outside F)
+### F.6 Alignment status
 
-New held reasons and decisions introduced here:
+Aligned with A.8.1 on 2026-10-25 (A.9). The decisions now applied here are:
 
-- `SYSTEM_AMBIGUOUS` (F.1.3);
-- `CITATION_UNSUPPORTED` (F.2.3);
-- `VALIDATION_FAILED` and `ERROR` already exist in B/E;
-- **Q-SPLIT-PROOF** (F.2.3);
-- the reporter-service alias map is an [ASSUMPTION] (F.1.3).
+- Q-SPLIT-PROOF (F.2.3);
+- Q-RETENTION-UNOBSERVED (F.2.1, strict);
+- Q-SYSTEM-ALIASES (F.1.3);
+- Q-SORT (F.3.3);
+- Q-DEP (F.1.4).
 
-| Topic | Where | Conflict | Proposed resolution (open for approval) |
-|---|---|---|---|
-| Three statuses vs held cases | A.2, A.8.3, E.4.3 vs F.3 | None remaining inside F. F never serializes a held case. The conflict is now a **run-level blocker** (F.3.2). | Keep A.8.3; the user chooses option a/b/c before the final run |
-| 518 rows vs unrepresentable cases | A.2 vs A.8.3/F.3.2 | Unresolved by design. Projected ≥6 held public samples (A.8.3). | Same: authorization required; no schema change |
-| Citation rules vs admissibility | C.7, C.8 vs F.2 | Consistent. **But D.3.3 rule 1** (slots combined across observations) and **D.2.3** (condition from another observation) allow verdicts that F.2.3 cannot cite with one ID. | Q-SPLIT-PROOF. Option 1: keep F.2.3 (hold). Option 2: amend D.3.3 so that COMPLETE requires a single-observation proof (the verdict itself becomes UNKNOWN otherwise). Both avoid a false COMPLETE; option 2 removes the held category. |
-| Retention condition evidence for `VERIFY_RECORD_PRESENT` | D.2.3 (rule_12 condition needs `retention_until`) vs F.2.1 check 5 / F.2.3 | [FACT] 6 of the 7 audit records cited in COMPLETE samples carry `retention_until` in the cited file (evidence_92, evidence_94). `audit_record_6909` (case_31, evidence_51) has **no** `retention_until` in any participant file, so its condition is `UNKNOWN(CONDITION_UNKNOWN)`. Under the current D/E/F rules, case_31 is held, although its expected answer is COMPLETE. | Not relaxed to match the sample. Open as **Q-RETENTION-UNOBSERVED**: (1) keep strict (held); or (2) an explicitly approved policy that a present SECURITY_AUDIT_LOG record without an observed retention field is treated as retained. That changes D.2.3 and needs authorization. |
-| Operation order vs dependencies | A.3.3, D.4 vs F.1.4 | Consistent: separate validation, sort wins, D2 conflicts reported | Q-DEP stays open |
-| Sample sorting vs specification | A.2.1 vs F.3.3 | No conflict in the data (zero-padded samples). The spec wording is ambiguous. | Q-SORT stays open for organizer confirmation |
-| A.4.5 gate pseudocode | A | Older and less complete than E.4.2 / F.4 L4(3–4) | Replace A.4.5 pseudocode with a reference to E.4.2 |
-| A.5 validator layers | A | L3/L4 text predates F.2.1 checks 1/4/6, F.2.3 and L4(5–7) | Point A.5 to F.4 as the authoritative list |
-| B.3 diagram, B.3.3, B.4.3 | B | Lack `SYSTEM_AMBIGUOUS`, `CITATION_UNSUPPORTED`, `VERIFICATION_SET_INCOMPLETE` and the D.6 reasons; the diagram shows the old "validation errors → held" without the all-or-nothing writer | Add reasons; update the diagram's writer node |
-| B.5 M8/M9 | B | M8 "step is not emitted and the case is held" matches; M9 "zero undecided held cases" matches. B.5 should reference F.2.1 and F.3.2. | Reference only |
-| C.6 / C.7 text | C | Still says decisions pending (Q-WEAK-VERIFY, Q-LATE-LINK) | Update to A.8.1 decisions |
-| D.6 list | D | Pending items unchanged; adds Q-SPLIT-PROOF linkage | — |
-| E.8 list | E | F.3 conflict listed there is now fixed in F; the rest remains | Update E.8 when aligning |
-| G | G | Needs tests for F.1.1 invariants, F.1.3 system resolution, F.2.1 checks 1–6 (each with a failing fixture), F.2.3, F.3.2 writer behaviour (held ⇒ no `output.csv`, non-zero exit, stale-file message), CSV round-trip, L1–L4 failing fixtures | — |
-| H | H | No stage for the all-or-nothing writer, the held report, or system resolution | — |
-| I | I | R18 (sort) and R19 (system naming) are superseded by F.3.3 / F.1.3. Add Q-SPLIT-PROOF, `SYSTEM_AMBIGUOUS` risk. | — |
-| J | J | Must add: held count 0 (or authorized), validator L1–L4 clean, staging-hash determinism, no stale `output.csv` | — |
+The three-status vs held conflict and the 518-row conflict are handled by the F.3.2 writer. They remain run-level items (A.8.3, X-HELD-MAPPING), not contradictions between sections.
 
-**Remaining blockers before Section F can be approved:**
-
-1. Q-SPLIT-PROOF decision; Q-RETENTION-UNOBSERVED decision (projected to hold case_31).
-2. Confirmation of the F.1.3 reporter-service alias entries.
-3. Q-SORT organizer confirmation, which does not block the plan but blocks final submission.
-4. The run-level held-case blocker (A.8.3), a user decision before the final run.
+[FACT] For `VERIFY_RECORD_PRESENT`, 6 of the 7 audit records cited in COMPLETE samples carry `retention_until` in the cited file. `audit_record_6909` (case_31) has none in any participant file, so under Q3 that case is held.
 
 ---
 
@@ -2370,7 +2322,7 @@ Each row lists the rule under test and its required failing or negative fixtures
 | E.3 conflicts | Same-time, same-quality disagreement → UNKNOWN; Q2 summary vs Q1 record → `RESOLVED_BY_QUALITY`; claim never supersedes an observation; started/completed lines of one trace are not a conflict | E.3.1 |
 | **M7 decision (gate)** | See G.1.1. This **replaces** the earlier "no finding ⇒ COMPLETE" test, which is withdrawn. | E.4.2, A.4.5 |
 | M8 steps | `len(verify) == len(REQ)` for COMPLETE and INCOMPLETE; duplicate key raises; activity "performed" claims produce no step; `system_id` precedence and `SYSTEM_AMBIGUOUS` hold; sort order from `OPERATIONS`; numbering | F.1 |
-| F.2 citations | One failing fixture per check 1–6 (activity ID rejected; late file rejected; other resource; workflow-only resource; observation that does not show the claimed state; `SUPERSEDED` ref); multi-observation-only proof → `CITATION_UNSUPPORTED` hold (current Q-SPLIT-PROOF rule) | F.2 |
+| F.2 citations | One failing fixture per check 1–6 (activity ID rejected; late file rejected; other resource; workflow-only resource; observation that does not show the claimed state; `SUPERSEDED` ref); proof only by combining observations → `UNKNOWN(PROOF_NOT_SINGLE_OBSERVATION)` → held (Q-SPLIT-PROOF) | F.2, D.3.3 |
 | M9 writer/validator | Each L1–L4 rule has a failing fixture; CSV round-trip with quotes; `[]` literal; `ROW_SORT_KEY` used by both writer and validator; held result passed to the writer raises | F.3–F.4 |
 
 #### G.1.1 Decision-gate tests (M7)
@@ -2384,7 +2336,7 @@ Each test uses a fixture whose sets are built from observations, not injected di
 | D-3 | No findings because every member is UNKNOWN | held, not COMPLETE | E.4.2 |
 | D-4 | One expressible violation, others determinable | INCOMPLETE; verification count = `|REQ|` | E.4.2, E.5 |
 | D-5 | One violation + one UNKNOWN member | held `VERIFICATION_SET_INCOMPLETE` | E.4.2 |
-| D-6 | No violations; one `RETAINED_RECORD_MISSING` | held `RETAINED_RECORD_MISSING` | D.3.9 |
+| D-6 | One `RETAINED_RECORD_MISSING`, with or without other violations | held `RETAINED_RECORD_MISSING` | D.3.9, Q-RETAIN |
 | D-7 | Primary-account slot empty (account only a workflow candidate) | held `REQUIRED_RESOURCE_UNRESOLVED` | C.6(a) |
 | D-8 | Category-ambiguous member | held | D.1.4 |
 | D-9 | Equal-time conflicting observations on a member | held (UNKNOWN `CONFLICTING_OBSERVATIONS`) | E.3.1 |
@@ -2476,11 +2428,11 @@ Each edge case asserts the decision **and** the evidence conditions that justify
 | E-7 | FAILED delete claim + 404 | ABSENT **only if** the 404 is a named negative (A.4.2a): the 404 line names the resource, the observation is admissible for state, the resource is linked to the subject, no later admissible positive observation exists in any copy, and the file passed extraction | Each condition asserted. A 404 that does not name the resource, or one superseded by a later replica row, gives UNKNOWN or PRESENT, respectively. The FAILED claim is attached as `CLAIM` and unused. | A.4.2, C.8.2, E.3.1 |
 | E-8 | SUCCESS delete claim + replica row present later | PRESENT → REMAINING | Replica copy observation admissible and later than any absence proof | C.8.2 |
 | E-9 | Audit record with `retention_until > audit_at` | `VERIFY_RECORD_PRESENT` | The single cited observation shows the record and `retention_until` (F.2.3) | D.2.3, F.2.3 |
-| E-10 | Audit record present, retention field never observed | held (current rule; Q-RETENTION-UNOBSERVED open) | Condition `UNKNOWN(CONDITION_UNKNOWN)` | D.2.3, F.6 |
+| E-10 | Audit record present, retention field never observed | held (Q-RETENTION-UNOBSERVED, strict) | Condition `UNKNOWN(CONDITION_UNKNOWN)` | D.2.3, A.8.1 |
 | E-11 | Backup `eligible=true deletion_block=false` on an ERROR-level line | RESTORABLE → RESTORE_RISK | Log level ignored; same observation has no contrary `restore_allowed=false` | D.3.6 |
 | E-12 | Connector enabled in an older screenshot, disabled in a newer log | DISABLED (compliant) | Newer admissible observation wins; the screenshot is used only if the media cache is valid | E.3.1, B.1.3 |
 | E-13 | Identifier-free analytics with a unique workflow claimant | Not in scope; no step; unresolved-scope report entry | `WORKFLOW_CANDIDATE` only | C.6, A.8.1 |
-| E-14 | Same subject, two requests | The later case excludes earlier-episode links with `EARLIER_EPISODE` | Link times vs the prior `audit_at` (Q-EPISODE default) | E.2.2 |
+| E-14 | Same subject, two requests | The later case excludes earlier-episode links with `EARLIER_EPISODE` | Link times vs the prior `audit_at` (Q-EPISODE = `prior_request`) | E.2.2 |
 | E-15 | Non-deletion text containing deletion words in negation | NOT_APPLICABLE | Matched `DELETION_NEGATION` clause recorded | E.1 |
 | E-16 | Subject with no admissible observations at all | held | Primary-account slot UNKNOWN | E.4.1 |
 | E-17 | Same-time conflicting observations | UNKNOWN → held | Both refs kept, roles `PROOF`/`CONTRARY` not assigned | E.3.1 |
@@ -2563,105 +2515,83 @@ Expected outcomes are derived from the cited rules and are re-derived if a rule 
 | Conditional note | If the approved rules change (e.g. C.8 coverage levels), the expected result is re-derived from the new rule, not kept for its own sake. |
 | Rules | C.8.2, D.2.2, E.4.2 |
 
-### G.6 Conflicts with other sections (recorded, not edited)
+### G.6 Alignment status
 
-| Previous G statement | Conflicting decision | Status |
-|---|---|---|
-| "M7 decision: no finding ⇒ COMPLETE" | A.4.5, E.4.2 completeness gate | **Withdrawn in G** (G.1, G.1.1) |
-| "518/518 and 32/32 emails resolve" as a test assertion | C.4 / E.2.1 unresolved-identity hold | **Changed in G** to a data metric (G.1.2) |
-| "Full real run: 518 rows, validator clean, deterministic" | A.8.3, F.3.2 held path | **Split in G** into I-1…I-7 |
-| "Field-level accuracy aligned by (operation, resource_id)" | Ambiguous with duplicates | **Replaced in G** by G.3.1 |
-| Anti-leakage relying on grep and sample metrics | — | **Replaced in G** by G.3.3 |
+The earlier G statements ("no finding ⇒ COMPLETE", "all emails resolve" as an assertion, the unconditional 518-row run, ambiguous alignment, grep-only leakage) were withdrawn or replaced in G.1–G.3. Tests that depended on open decisions now follow the A.8.1 decisions:
 
-Remaining contradictions outside G that affect testing:
-
-- **H (roadmap):** has no stages for gate tests, held-path integration (I-2…I-4) or custom-case builders.
-- **I (risks):** R10–R12, R18 and R19 are superseded by E/F. Q-SPLIT-PROOF and Q-RETENTION-UNOBSERVED are not listed.
-- **J (checklist):** still requires "518 rows" without the held-path condition, and lacks the false-COMPLETE = 0 and invalid-citation = 0 gates.
-- **A.5, A.4.5, B.3/B.4.3, C.6/C.7, D.6, E.8, F.6:** their alignment lists are unchanged.
-
-Open decisions that tests are currently written against (conservative rule):
-
-| Decision | Tests affected |
-|---|---|
-| Q-SPLIT-PROOF | F.2 test, CC2-n |
-| Q-RETENTION-UNOBSERVED | E-10 |
-| Q-EPISODE | E-14 |
-| Q-SORT | writer/validator order |
-| D-assumptions | legacy contact index test |
+- Q-SPLIT-PROOF: F.2 and CC2-n expect `PROOF_NOT_SINGLE_OBSERVATION` → held;
+- Q-RETENTION-UNOBSERVED: E-10 expects held (strict);
+- Q-EPISODE: E-14 uses `prior_request`;
+- Q-D-ASSUMPTIONS: each assumption has its own edge test.
 
 ---
 
 ## H. Implementation roadmap
 
-Each stage is independently testable. **Start with M1 + M2 (loader and evidence normaliser)**: every later module consumes `Observation`s, the formats are fully known, and the cutoff/anomaly facts discovered above can be locked in tests before any decision logic exists.
+Each stage is small enough to inspect and test on its own. A stage starts only when its dependencies pass their acceptance criteria.
+
+- Test command for every stage: `python -m unittest discover -s code/tests -t code -v`. The `code/` directory is the import root; the package is `audit`, which avoids the standard-library module name `code`.
+- Stages 0–3 are authorized. Later stages wait for review.
 
 | Stage | Deliverable | Depends on | Acceptance criteria |
 |---|---|---|---|
-| 0 | Skeleton package, `config.py` enums, `unittest` runner | — | `python -m unittest` runs; validator enums equal A.3 |
-| 1 | M1 loader + schema validation | 0 | All 9 CSVs load; counts equal A.1; 94 manifest paths exist |
-| 2 | M2 SQL + JSON parsers | 1 | All 24 SQL + 28 JSON parse; nested `record_json`/`hits` produce observations; anomaly flag set on evidence_13/36 records |
-| 3 | M2 log + TXT parsers, trace grouping, identifier extraction | 2 | 4 log formats parsed; each `*_completed` resource line inherits its started-line key; free-text emails found |
-| 4 | M9 serializer + validator (early, so every later stage can emit valid files) | 0 | Validator rejects every crafted bad fixture; accepts `sample_output.csv` |
-| 5 | M3 identity | 1 | 518/518 and 32/32 emails resolve; historical sets complete |
-| 6 | M5 scope + admissibility (no workflow links yet) | 3, 5 | On samples, grounded scope recall reported per case; no excluded-episode resources (case_07, case_17) |
-| 7 | M4 policy + M6 state | 6 | State of every sample expected resource that has admissible evidence matches the sample decision |
-| 8 | M7 decision + M8 steps + E.1 intent (deterministic) | 7, 4 | Sample evaluator runs; metrics recorded as baseline in `evaluation_report.md` |
-| 9 | Evaluator metrics + explain traces | 8 | All G.3 metrics reported; every failure categorised |
-| 10 | Workflow-link modes, omission citation variants, `LATE_INNER_LINKING` flag experiments | 9 | Each flag decision justified in the report with before/after metrics, not per-case |
-| 11 | Media extraction (after dependency/provider approval) | 3 | Cache produced by script; media observations indexed; affected cases re-evaluated |
-| 12 | Custom cases CC1–CC5, edge-case tests | 8 | All pass |
-| 13 | Full 518 run, determinism check, `usage_report.md`, README run section | all | Validator clean; byte-identical rerun; usage figures from actual counters |
-| 14 | Packaging + trace export | 13 | Zip contents checked against A.5; no dataset/secrets/nested archives |
-
----
+| 0 | Package skeleton (`code/audit/…`, `code/tests/`), `config.py` (`OPERATIONS`, `TREATMENTS` with the SUPPLEMENTAL `DATA_FLOW` marker, category list, decided flags from A.8.1, `ROW_SORT_KEY`, `SYSTEM_ALIASES`, collection→system map, noise events, input-file allow-list), `errors.py` (A.8.4 codes), `models.py`, test runner | — | `OPERATIONS` equals A.3.1 row-for-row. Every `deletion_rules.csv` category has a `TREATMENTS` entry. Flags equal A.8.1. Leakage tests pass (no `sample_output` in production code; `audit` does not import evaluation/tests/tools). |
+| 1 | M1 loader (A.1.4, B.5 M1) | 0 | Real dataset loads with 0 errors; row counts reported; each check has a failing fixture; `sample_output.csv` rejected by the allow-list |
+| 2 | SQL + JSON parsers → `Observation`s, coverage units, inner times, anomaly flags, nested hits, `FileExtraction` | 1 | All 24 SQL and 28 JSON files parse with a status and counts. SQL header vs manifest checked. The evidence_13/36 anomalies are flagged. Provenance tests pass. |
+| 3 | Log + TXT parsers (4 line formats + pipe), trace grouping, trace keys, identifier extraction (C.3) | 2 | All 26 logs and the TXT parse. Any non-OK status is explained. Started-line keys are attached as `TRACE_KEY`. Free-text identifiers are found. Normalisation keeps raw values. |
+| 4 | Stdlib PDF extractor (B.1.2); media-cache reader with SHA verification (B.1.3); `ObservationIndex` | 3 | 4 PDFs OK. 11 PNGs reported as `EVIDENCE_GAP` until an authorized cache exists. |
+| 5 | M3 identity + associations (C.4) | 1 | 518/518 and 32/32 resolution reported as data metrics; reuse/ambiguity fixtures |
+| 6 | M5 links, scope rules I1–I5/E1–E3, admissibility (C.7), workflow candidates (C.6), episode (`prior_request`) | 4, 5 | C.7 ten-row table tests; every included/excluded resource has a reason code |
+| 7 | M4 classification (D.1), conditions (D.2), dimensions and verdicts (B.4, D.3, single-observation proof), omission (C.8), conflicts (E.3.1) | 6 | Unit tests for D.1–D.3, C.8 and E.3.1; Q-D-ASSUMPTIONS edge tests |
+| 8 | Intent (E.1), sets and gate (E.4–E.5) | 7 | G.1.1 gate tests D-1…D-13; E.1.3 intent tests |
+| 9 | Steps, citations, system resolution (F.1–F.2), serializer, validator L1–L4, all-or-nothing writer, held report (F.3–F.4) | 8 | F/G.1 tests; integration I-1…I-5 |
+| 10 | Evaluator and metrics (G.3), custom cases CC1–CC5 (G.5), edge cases (G.4) | 9 | Metrics computed from an actual run; false-COMPLETE = 0; invalid citations = 0 |
+| 11 | **First complete analysis run** on real data | 10 | Staging file and held report produced; **no root `output.csv`**. Held count, case IDs, reasons and evidence gaps reported to the user (Q1). |
+| 12 | Media extraction (B.1.3) | 11 + X-MEDIA-TRANSMISSION | Only after explicit approval and a confirmed model; cache hash-verified; affected cases re-run |
+| 13 | Final run | 11 (+12 if approved) + X-HELD-MAPPING | Held = 0, or an authorized mapping applied; validator clean; byte-identical rerun; `usage_report.md` and `evaluation_report.md` generated; README bottom section added (Q-README) |
+| 14 | Packaging and trace export | 13 | J checklist passes |
 
 ## I. Risks, assumptions and unresolved questions
 
-| # | Issue | Evidence / requirement | Risk | Conservative handling | Validate / resolve |
+| # | Issue | Evidence / requirement | Risk | Handling (decided) | Validation |
 |---|---|---|---|---|---|
-| R1 | Identifier-free resources linked only by workflow timing | case_03/21/25–28 analytics; case_01/02/04/07/08/10 accounts; AGENTS §6.6 grounded links | Missing or wrong-person verification steps | `unique_only` assignment; WORKFLOW links never create findings; log ambiguity | Sample metrics per mode; document justification |
-| R2 | Two cases share a workflow window (`reported_at` identical) | case_03 vs eval case_44 | Wrong attribution | Assign to none | None possible from public data |
-| R3 | Late-captured file with earlier inner timestamps | evidence_02 (09-17, inner 09-15), evidence_06 (09-18, lines 09-16); 6 sample resources depend on it | Using post-cutoff info; or missing scope | Never for state/citation; link-only under flag `LATE_INNER_LINKING` | Compare flag on/off on samples; confirm interpretation with user |
-| R4 | Observation dated after its own file capture | evidence_13 (`account_1417` FOUND 08-14 in an 08-12 file), evidence_36 | False finding before the event happened | Admissible only if `observed_at <= audit_at`; anomaly logged | Unit test |
-| R5 | Absence by omission: which snapshot qualifies and is cited | case_01/02/04 cite evidence_54; case_04 could cite evidence_90; case_31 evidence_51 | Wrong citation; false ABSENT if coverage is misread | Require declared coverage; replica-aware; latest qualifying snapshot | Variant comparison on samples |
-| R6 | Expected resources absent from every participant file | `audit_record_6645` (case_18), `audit_record_5569` (case_20) | Unavoidable step misses | None; report as known gap | — |
-| R7 | Support category ambiguity (REDACT vs DELETE) without `record_type` | case_10 replica copy, case_07 PDF, case_19 message scan | Wrong action / finding op | Precedence D.1; workflow hint as tie-breaker | Per-category confusion matrix on samples |
-| R8 | Analytics-system record that is not an analytics profile | case_12 `contact_lookup` | ANONYMIZE instead of DELETE | Content-based classification | Unit test + sample |
-| R9 | Episode scoping (earlier requests by the same person) | case_17 (`account_6523`, `tombstone_17`), case_07 (`object_19`); prior eval cases case_46, case_61 | Extra out-of-scope steps, or missing old-but-relevant records | `prior_request` boundary; `requested_at` variant evaluated | Sample metrics; inspect eval subjects with multiple requests |
-| R10 | Verification set membership beyond account/audit/findings | Samples never show an already-compliant extra resource in an INCOMPLETE case | Extra or missing verification steps | Include all in-scope resources with a determinable final state | Sample metrics |
-| R11 | Account linkage when no identifier links it | case_01/02/04/07/08/10 | Missing mandatory account verification | Grounded first; WORKFLOW fallback only for `account_service` DELETE actions, unique | Sample metrics |
-| R12 | Non-deletion detection with no labelled examples | case_533–542 inputs; no NOT_APPLICABLE in samples | 10 cases wrong | Explicit negation patterns; LLM fallback only for unmatched; manual read-through of the 10 inputs | Custom case CC4; report cross-check against `CLASSIFY_REQUEST` claims |
-| R13 | Conflicting catalog claim vs observed identity | `marketing_001` LINK activity vs console screenshot | Wrong subject | Grounded observation wins | Explain log |
-| R14 | Retained record missing has no output operation | rules 12/13; A.3 enum | Cannot express the violation | No invented step; log; flag | Clarify with user |
-| R15 | Expired retention or inactive legal hold | rule_12/13 conditions | Wrong RETAIN | Evaluate the condition; if false, no step and logged | None observed so far |
-| R16 | Media extraction requires a dependency or LLM | 4 PDFs, 11 PNGs; no libs installed | Missed links (e.g. `support_001` only in PDF) | Cached, scripted extraction after approval; pipeline still runs without it | Re-run samples with/without media |
-| R17 | Report path and README ownership conflict | AGENTS §6.8 vs README | Packaging rejection | `code/evaluation/`; README section added | Confirm with user |
-| R18 | `case_id` sort semantics (natural vs lexicographic) | AGENTS §6.3 "Sort rows by case_id" | Ordering penalty | Natural order (matches input files) | Confirm; validator reports both |
-| R19 | `system_id` naming for exports/object storage, replicas | samples use owning system | Field mismatch | Canonical owning-system map | Sample field accuracy |
-| R20 | `RESTORE_BACKUP` recreation event | activity (1 row) | Missed restore risk | D.3 proposal | Inspect affected eval case once pipeline runs |
-
----
+| R1 | Identifier-free resources | C.6; samples case_03/21/25–28 | Missing verification steps | Workflow-only candidates never produce steps (Q-WEAK-VERIFY = No) | G.1 C.6 tests; public-sample loss reported |
+| R2 | Primary account without a grounded link | case_01/02/04/07/08/10 | Held cases | Case held (Q2) | Stage 11 held report |
+| R3 | Late-captured files | evidence_02, evidence_06 | Using post-cutoff evidence as proof | Link-only (Q-LATE-LINK) | C.7 tests 4–6 |
+| R4 | Observation dated after its own capture | evidence_13, evidence_36 | False findings | Not admissible (C.7) | Stage 2 anomaly test |
+| R5 | Omission snapshot selection | C.8; case_04 | Wrong citation or false ABSENT | Coverage-first, replica-aware | C.8 tests; four-case oracle |
+| R6 | Expected resources absent from all files | case_18/20 audit records | Unavoidable misses | None possible | Reported |
+| R7 | Support category ambiguity | D.3.1; `support_2315` | Wrong action | Tiered classification; ambiguity → UNKNOWN → held | D.1/D.3.1 tests |
+| R8 | Contact-lookup records in analytics | case_12 | ANONYMIZE instead of DELETE | Q-D-ASSUMPTIONS (a) | Edge test |
+| R9 | Retention unobserved | case_31 | Held | Strict (Q3) | E-10 |
+| R10 | Combined-observation proof | D.3.3 | False COMPLETE | Single observation (Q4) | F.2 tests, CC2-n |
+| R11 | Retained record missing | D.3.9 | No operation to express it | Held (Q7) | D-6 tests |
+| R12 | Intent ambiguity | E.1; 10 non-deletion inputs | Wrong NOT_APPLICABLE | Clause-scoped classifier; UNSURE → held; LLM off (Q14) | E.1.3 tests |
+| R13 | Media gap | 11 PNGs; transmission not authorized | Missing links for evaluation subjects | `EVIDENCE_GAP` reported (Q13) | Coverage report |
+| R14 | System naming | F.1.3 | Field mismatch | Owner fields first, then aliases (Q12); else `SYSTEM_AMBIGUOUS` | F.1.3 tests |
+| R15 | Held vs 518 rows | A.8.3 | No compliant output | All-or-nothing writer; X-HELD-MAPPING | I-2…I-7 |
+| R16 | Sort interpretation | Q-SORT | Ordering penalty | Numeric (Q16) | X-SORT-CONFIRM |
+| R17 | Shared-function validation blind spots | F.4 caveat | Validator passes buggy logic | Fixture unit tests + sample evaluator | G |
+| R18 | `RESTORE_BACKUP` recreation | D.3.7 | Missed risk | Claim triggers an investigation; findings only from observations | D.3.7 tests |
 
 ## J. Final readiness checklist
 
-Before generating the final `output.csv`:
+Before the final `output.csv` (Stage 13):
 
-- [ ] `python -m unittest` passes (all modules, edge cases, anti-leakage greps).
-- [ ] Sample evaluator run completed; metrics and failure analysis written to `code/evaluation/evaluation_report.md` from the actual run (no estimated numbers).
-- [ ] Custom cases CC1–CC5 pass and are documented in the report.
-- [ ] Every enabled feature flag has a written justification (not per-case).
-- [ ] Production code has no reads of `sample_output.csv` and no case-ID/resource-ID/evidence-ID literals.
-- [ ] Media extraction (if enabled) is generated by script, cached, and its provenance documented.
-- [ ] Full run on 518 cases: validator reports 0 errors; 518 rows; IDs match input; sorted; JSON valid; enums valid; citations exist and are `≤ audit_at`.
-- [ ] Two consecutive runs produce byte-identical `output.csv`.
-- [ ] `usage_report.md` filled from the run's actual counters (including "0 LLM calls" if applicable), with providers, models, calls, tokens, averages and costs.
-- [ ] Root README has exact setup and run commands; no secrets; `.env` (if any) is uncommitted.
+- [ ] `python -m unittest discover -s code/tests -t code` passes (all modules, gate, intent, edge and integration tests).
+- [ ] The evaluator ran. `evaluation_report.md` was generated from the actual run. False-COMPLETE = 0 and invalid citations = 0.
+- [ ] CC1–CC5 pass and are documented.
+- [ ] Coverage: zero `FAILED` text-evidence files. The PNG gap is either resolved by an authorized, hash-verified cache or explicitly accepted by the user.
+- [ ] Held count is 0, or X-HELD-MAPPING was decided and applied as authorized.
+- [ ] Validator L1–L4 and run-level checks are clean; 518 rows in `ROW_SORT_KEY` order.
+- [ ] Two runs produce byte-identical output.
+- [ ] `usage_report.md` comes from actual counters (including "0 LLM calls" if so).
+- [ ] No `sample_output.csv` access from production code (leakage tests). No case/evidence ID literals.
+- [ ] The README "Solution — Setup and Run" section is appended at the bottom; the challenge text is unchanged.
+- [ ] X-SORT-CONFIRM status is noted.
 
-Before packaging:
+Before packaging (Stage 14):
 
-- [ ] `code.zip` contains `README.md`, `code/` (including `code/evaluation/evaluation_report.md` and `usage_report.md`, plus prompts). It contains no `dataset/`, `__pycache__`, venvs, nested archives, credentials or real PII.
-- [ ] Root `output.csv` is final.
-- [ ] `log.txt` entries are valid (each has `tool=` and `model=`) and are uploaded as `chat_transcript`.
-- [ ] `agent-trace.zip` prepared per `agent_trace_instructions.md`, reviewed for secrets.
-- [ ] Untracked directories unrelated to the solution are not included in any archive.
+- [ ] `code.zip` = `README.md` + `code/` (including `code/evaluation/*.md`, prompts, `media_cache/` if any). It contains no `docs/`, `dataset/`, `runs/`, caches, `.env`, nested archives or personal values.
+- [ ] Privacy regex scan (A.7.3) of `log.txt`, the reports and the zip contents is reviewed.
+- [ ] `log.txt` entries are valid (`tool=`, `model=`). `agent-trace.zip` is staged, scanned and approved.

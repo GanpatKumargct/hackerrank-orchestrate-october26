@@ -1096,3 +1096,179 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T00:45:25Z] List all open questions and decisions
+
+User Prompt (verbatim, secrets redacted):
+Now can you list down what ever Questions do you have? or Open decisions?
+
+Agent Response Summary:
+Compiled every open decision from the plan revisions into one prioritized list of 17 items with recommendations: output-blocking items (A.8.3 held-vs-518 option, primary-account basis for workflow-only accounts, Q-RETENTION-UNOBSERVED, Q-SPLIT-PROOF, VERIFICATION_SET_INCOMPLETE), policy/scope items (Q-EPISODE, Q-RETAIN, Q-RETENTION-EXPIRED, Q-HOLD-EXPIRED, Q-DEP, six Section D assumptions), implementation items (system alias map, OpenAI vision model/transmission approval, intent LLM fallback), packaging items (Q-README, Q-SORT), and permission to start the cross-section alignment pass. No files other than this log were changed.
+
+Actions:
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
+## [2026-10-25T01:03:48Z] Record decisions, align plan, implement Stages 0-3 with tests
+
+User Prompt (verbatim, secrets redacted):
+We have reviewed the revised `docs/IMPLEMENTATION_PLAN.md`. The following are the project owner's decisions for the remaining open questions. Record them in the decision register and perform the cross-section alignment pass.
+
+After alignment, begin implementation according to the roadmap, starting with Stage 0 and proceeding through Stage 3. Do not implement the entire pipeline in one pass. Stop after Stage 3, run the relevant tests, and report the actual results for review.
+
+## 1. Final-output blockers
+
+**Q1 — Held cases vs. 518-row output**
+
+Keep the existing conservative held-case design. Do not invent or silently map a held result to an allowed output status. Implement the held-case report and all-or-nothing writer exactly as planned.
+
+After the first complete analysis run, report the actual held-case count, every held case ID, its reason, and the evidence gap. We will decide any reason-specific mapping or authorize additional evidence work only after reviewing those results. Do not generate a final root `output.csv` while unresolved held cases remain.
+
+**Q2 — Q-WEAK-VERIFY / primary-account basis**
+
+Keep `Q-WEAK-VERIFY = No`. Workflow-only candidates are not grounded identity links and must not independently generate findings, remediation, or verification steps. If a required primary account has no independently grounded basis, keep the case held. Do not weaken identity requirements to match samples.
+
+**Q3 — Q-RETENTION-UNOBSERVED**
+
+Use the strict policy. If a security audit record is present but its required `retention_until` condition cannot be established from admissible evidence, the condition remains UNKNOWN and the case is held. Do not infer that the record is within retention merely because it exists.
+
+**Q4 — Q-SPLIT-PROOF**
+
+Choose Option 2: a COMPLETE verification step must be supported by a single admissible observation that independently proves the entire state claimed by that step.
+
+If the required state can only be established by combining observations, treat that required state as UNKNOWN for the completeness gate. Do not emit a partial citation or mark the case COMPLETE.
+
+Important: this removes the specific `CITATION_UNSUPPORTED` path by turning the state into UNKNOWN; it does not guarantee that the case will no longer be held. Preserve the held path whenever proof is still insufficient.
+
+**Q5 — VERIFICATION_SET_INCOMPLETE**
+
+Keep the case held when a required resource is UNKNOWN, even if another resource already has a proven violation. Do not emit an INCOMPLETE result that silently omits a required check.
+
+## 2. Policy and scope decisions
+
+**Q6 — Q-EPISODE**
+
+Approve `EPISODE_MODE = prior_request`. Earlier deletion episodes must be excluded from the current case's scope according to the plan's defined boundary and tests.
+
+**Q7 — Q-RETAIN**
+
+If a required retained record is proven absent—including a required tombstone reference—hold the case. Do not invent a remediation operation. Do not emit `VERIFY_RECORD_PRESENT` for a record that is already proven absent and cannot be restored through an authorized, supported remediation. Record the reason in the explain trace and held report.
+
+If presence or the required retention condition is merely UNKNOWN, that also blocks COMPLETE; preserve the appropriate uncertainty reason.
+
+**Q8 — Q-RETENTION-EXPIRED**
+
+Keep `POLICY_GAP` → held when the security-audit retention condition is expired and the applicable policy does not authorize the proposed action. Do not invent a new treatment. This is not known to occur in the current data, but implement the test.
+
+**Q9 — Q-HOLD-EXPIRED**
+
+Apply the same conservative approach to an expired or released legal hold: use `POLICY_GAP` → held unless participant-visible policy clearly establishes the required treatment. Do not invent an operation.
+
+**Q10 — Q-DEP**
+
+The explicit output sorting contract takes precedence over downstream-to-source dependency ordering when they conflict. Keep the mandated output order unchanged, report `DEPENDENCY_ORDER_CONFLICT`, and test the conflict. Continue enforcing dependencies that do not conflict with the output contract.
+
+**Q11 — Section D assumptions**
+
+Approve the six listed assumptions provisionally, with the following safeguards:
+
+- Legacy contact index → `SECONDARY_IDENTIFIER` / DELETE.
+- Keep the specified shared-context indicators for rule_05.
+- Rule_14 restore-block condition defaults to TRUE unless admissible evidence explicitly shows blocking is impossible.
+- Handover evidence saying there is no direct identifier counts as cleared identifier slots only when the evidence actually establishes that condition; absence of a field alone is not proof.
+- Approve the documented connector-to-target-system mapping.
+- Use `VERIFY_RECORD_PRESENT` for a required legal-hold record when its retention condition and presence are proven.
+
+Keep these labelled as assumptions, not challenge requirements. Document their basis and add tests for the edge cases. Do not silently upgrade an assumption into a verified fact.
+
+## 3. Implementation decisions
+
+**Q12 — System aliases**
+
+Approve the mappings `profile_service → account_service` and `support_replica → support_platform`, provided the existing evidence supports the documented ownership mapping. Keep the alias map centralized in configuration and test it.
+
+**Q13 — Screenshot extraction / vision provider**
+
+OpenAI is the preferred provider, but screenshot transmission is NOT yet authorized. Do not send the 11 screenshots to an external service or make a vision API call during this implementation stage.
+
+Proceed with the deterministic core and media-cache reader. Treat missing or unverified PNG extraction as an explicit evidence-coverage gap. Before the final run, report the vision-capable model options actually available and ask for explicit approval before transmitting any screenshots.
+
+**Q14 — Intent LLM fallback**
+
+Keep `AUDIT_LLM_ENABLED=0` by default. If deterministic intent classification returns UNSURE, keep the case held and report the reason. Do not silently convert it to NOT_APPLICABLE. No LLM call should occur unless separately authorized.
+
+## 4. Packaging and sorting
+
+**Q15 — Q-README**
+
+Preserve the original challenge text and add the clearly delimited `Solution — Setup and Run` section at the bottom of the root README. Do not rewrite or move the original challenge content.
+
+**Q16 — Q-SORT**
+
+Use numeric suffix order for `case_id`, matching the ordering of `deletion_requests.csv`. Do not claim that the organizers confirmed this interpretation. Record organizer confirmation as an external follow-up; it does not block core implementation.
+
+## 5. Alignment and implementation authorization
+
+**Q17 — Cross-section alignment**
+
+Approved. Update all affected sections and decision registers consistently, including the roadmap, risks, tests, evaluation requirements, readiness checklist, and output-generation rules. Remove stale pending wording where a decision is now made. Retain only genuinely unresolved external or evidence-dependent decisions.
+
+Before writing implementation code:
+
+1. Review the repository instructions and logging requirements.
+2. Make the documentation alignment pass.
+3. Check for contradictions across the updated plan and report any that remain.
+4. Begin Stage 0: package skeleton, canonical configuration, enums, and test runner.
+5. Continue through Stage 1: input loader and schema validation.
+6. Continue through Stage 2: SQL and JSON evidence parsers.
+7. Continue through Stage 3: log/TXT parsing, trace grouping, and identifier extraction.
+
+Follow the roadmap's dependencies and acceptance criteria. Do not skip tests to move faster.
+
+### Strict boundaries
+
+- Keep `dataset/` and source evidence untouched.
+- Do not modify or inspect `ganpat-hackrank-hack/`.
+- Do not generate predicted final results or a final root `output.csv` during these stages.
+- Do not hardcode sample answers, case IDs, evidence IDs, or case-family shortcuts into production logic.
+- Do not add dependencies without an identified need and authorization.
+- Append the required log entry for each turn, using actual tool/model metadata only when available.
+- Do not claim a test passed unless it was actually run and passed.
+
+### Stop point and report
+
+Stop after Stage 3. Report:
+- Files created or modified.
+- Alignment changes and any remaining contradictions.
+- Actual commands and test results.
+- Parser coverage and extraction gaps.
+- Known limitations and decisions still requiring external approval.
+
+Wait for review before implementing later stages.
+
+Agent Response Summary:
+Recorded all 17 decisions in a rewritten A.8 register (decided items, three external items X-SORT-CONFIRM / X-MEDIA-TRANSMISSION / X-HELD-MAPPING, canonical reason codes) and completed the alignment pass across A-J (stale pending wording removed; gate order fixed so RETAINED_RECORD_MISSING always holds; single-observation proof applied in D.3.3/D.2.3/F.2; B.4.3 reasons; roadmap/risks/checklist rewritten); post-pass search found no remaining stale decision wording. Implemented Stages 0-3 with Python stdlib only: canonical config/enums/treatments/flags, reason codes, data models, strict loader with referential/chain/hash/manifest checks and input allow-list, SQL/JSON/log(7 shapes)/TXT parsers with trace grouping, trace/query keys, identifier extraction and coverage units; PDFs/PNGs reported as EVIDENCE_GAP. Ran `python -m unittest discover -s code/tests -t code`: first run 65 tests, 1 failure + 1 error (a real JSON nested-hit timing bug and a wrong test fixture), both fixed; final run 65 tests OK. Real data: 79/79 text evidence files OK, 2951 observations, 197 coverage units, 2 observed_after_capture anomalies (evidence_13/36), one noise-event resource mention surfaced as a warning; flagged that 996 observations lack an explicit owner field (Stage 9 system-resolution question). No dataset change, no output.csv, no API calls, no new dependencies.
+
+Actions:
+* Edited docs/IMPLEMENTATION_PLAN.md (A.8/A.9 rewritten; targeted alignment edits in A-G; H/I/J rewritten)
+* Created code/audit/{__init__,config,errors,models,timeutil,loader}.py and code/audit/evidence/{__init__,common,normalize,sql_parser,json_parser,log_parser,text_parser,extract}.py
+* Rewrote code/main.py (inspect command only)
+* Created code/tests/{__init__,fixtures,test_config,test_leakage,test_loader,test_normalize,test_sql_parser,test_json_parser,test_log_parser,test_provenance,test_real_evidence}.py
+* Ran python -m unittest discover -s code/tests -t code (final: 65 tests OK) and python code/main.py inspect
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
