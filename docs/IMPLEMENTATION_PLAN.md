@@ -358,17 +358,76 @@ Before packaging, the zip listing is checked to contain `code/evaluation/evaluat
 
 All dataset persons are fictional [REQ: AGENTS §7], but personal-data handling applies as if they were real (organisation policy, DPDP Act 2023).
 
-### A.8 Decisions and open questions recorded in this section
+### A.8 Decision register
+
+This register is the single place where decisions and open questions are recorded. Other sections reference IDs from here. Each row states the source of the decision ("user" = decided by the project owner in the session dated 2026-10-25) and any condition attached to it.
+
+#### A.8.1 Decided
+
+| ID | Topic | Decision | Source | Conditions / constraints |
+|---|---|---|---|---|
+| Q-SORT | Row order | Numeric suffix order of `case_id` (A.2.1) | plan | Organizer confirmation still requested; single implemented order |
+| Q-REPORTS | Report location | `code/evaluation/evaluation_report.md`, `code/evaluation/usage_report.md` (A.7.1) | plan, README line 99/145 | — |
+| Q-WEAK-VERIFY | Steps for resources linked only by workflow candidates (C.6) | **No.** No finding, remediation or verification step is generated for a resource whose only basis is a `WORKFLOW_CANDIDATE`. | user | A resource enters a case only through an independently grounded link (C.5.2: `RECORD_FIELD`, `TRACE_KEY`, `FREE_TEXT_MENTION`, `DERIVED_FROM`, `CATALOG_CLAIM`) or another basis explicitly approved later and recorded here. Workflow candidates stay a separate, non-proof category (C.6) and are reported as unresolved scope. Evidence requirements are not relaxed to improve sample matching. |
+| Q-LATE-LINK | Late-captured files with inner timestamps ≤ `audit_at` | **Yes, for identity/scope linking only.** | user | Strict conditions are those of `admissible_for_link` (C.7): file `captured_at > audit_at`, inner `observed_at` present and `≤ audit_at`, no `observed_after_capture` anomaly. Such evidence **never** establishes resource state, never serves as state-verification evidence, and is never cited. Links carry the note `LINK_EVIDENCE_POST_CUTOFF`; provenance (file and inner times) is preserved; the separation is covered by `test_admissibility.py` cases 4–6 and the `PROOF`-role assertion (C.7). |
+| Q-UNDETERMINED | Cases that fail the completeness gate without an expressible violation (A.4.5), plus `UNSURE` intent, `IDENTITY_UNRESOLVED`, `RETAINED_RECORD_MISSING`-only and `ERROR` cases | **Internal held path.** No new output status. Unknown evidence is never mapped to COMPLETE, INCOMPLETE or NOT_APPLICABLE. The output schema is not modified without authorization. | user | Before final output generation, the run must report the held-case count and the conflict in A.8.3. |
+| Q-MEDIA-PROVIDER | PNG extraction provider | **OpenAI preferred.** | user | Two preconditions must be met before any extraction call: (1) confirm which vision-capable model is available to the account; (2) obtain explicit approval to transmit the 11 screenshots externally. Until both are met, no screenshot is sent and PNGs remain `EXTRACTION_FAILED` / `EVIDENCE_GAP` (B.1.3). Each cache entry preserves image SHA-256, prompt SHA-256, provider, model ID, extraction time and schema version, with deterministic hash validation at run time. Extracted facts are never fabricated or entered manually. [FACT] The `openai` Python SDK 2.29.0 is already installed, so no new dependency is needed for this choice. Model availability has **not** been verified: no API call has been made. |
+| Q-DOCS-ZIP | Whether `docs/` goes into `code.zip` | **Excluded from `code.zip`. Repository-only.** | user rule applied to the packaging text | See the packaging check below. Revisit only if the organizers state that additional documentation folders are permitted. |
+
+**Packaging check behind Q-DOCS-ZIP** [FACT: exact repository text inspected]:
+
+- Permitted contents of `code.zip`: "Runnable solution, prompts, configuration, `README.md`, and `evaluation/` reports" (README line 122; AGENTS §6.9 line 363; problem_statement line 145).
+- Packaging command: `README.md` and `code` only (README lines 134, 140).
+- Exclusion list: `dataset/`, virtual environments, dependency caches, `__pycache__`, nested archives, API keys, credentials, real personal data, sensitive configuration (README lines 146–147; AGENTS line 368). `docs/` is neither listed as permitted nor listed as excluded.
+- Submission items: `code.zip`, `output.csv`, `chat_transcript` (`log.txt`), AI interview (README lines 122–125; AGENTS lines 363–366). **No slot exists for a separate documents upload.**
+
+Applying the rule "include only if permitted", `docs/` is not added to the zip, and it cannot be submitted separately. The plan therefore stays in the repository only. The submission README section (A.7.2) and the evaluation reports carry the explanations a reviewer needs.
+
+#### A.8.2 Open
 
 | ID | Topic | Status |
 |---|---|---|
-| Q-SORT | Row order | **Decided:** numeric suffix order (A.2.1); organizer confirmation requested |
-| Q-REPORTS | Report location | **Decided:** `code/evaluation/` (A.7.1) |
-| Q-README | Position of the README addition | Open: user confirmation |
-| Q-UNDETERMINED | Output mapping for cases that fail the completeness gate without a proven violation | Open: user decision before final generation (A.4.5) |
-| Q-RETAIN | Missing retained record or false retention condition: no output operation exists | Open: recorded, no invented step (A.4.3) |
-| Q-DEP | Downstream→source dependency that conflicts with the sort order | Open: none observed; output follows the sort rule; conflict reported (A.3.3) |
-| Q-LATE-LINK | Using late-captured files with earlier inner timestamps for identity linking only | Open: see C.7 / I.R3 |
+| Q-README | Position of the solution section in the root README (A.7.2) | Open: user confirmation |
+| Q-RETAIN | Missing required retained record (audit record, active legal hold, tombstone reference, backup archive), and whether such a case's verification lists `VERIFY_RECORD_PRESENT` (D.3.9) | Open: held path; no invented step |
+| Q-RETENTION-EXPIRED | Security audit record past `retention_until` (D.3.4) | Open: `POLICY_GAP`, held; [FACT] not exercised by current data |
+| Q-HOLD-EXPIRED | Legal hold expired or released (D.3.5) | Open: `POLICY_GAP`, held; [FACT] not exercised by current data |
+| Q-DEP | Downstream→source dependency that conflicts with the A.2 sort order | Open: output follows the sort rule; conflict reported (A.3.3, D.4.2) |
+| D-assumptions | Section D [ASSUMPTION]s: legacy contact index → SECONDARY_IDENTIFIER; rule_05 context indicators; rule_14 default TRUE; handover "no direct identifier" counts as cleared slots; connector → target-system map; legal-hold `VERIFY_RECORD_PRESENT` | Open: user confirmation |
+
+#### A.8.3 Blocking conflict: held cases vs the 518-row output contract
+
+**The two requirements cannot both be satisfied when any case is held.**
+
+- **Requirement (explicit):** `output.csv` must contain exactly 518 data rows, one per `case_id`. Each `deletion_status` must be COMPLETE, INCOMPLETE or NOT_APPLICABLE [REQ: AGENTS §6.3, problem_statement "Required Output", README checklist].
+- **Decision (Q-UNDETERMINED):** held cases get no invented status and are not silently mapped.
+- **Consequence:** if the final run has ≥1 held case, a compliant `output.csv` cannot be produced without either resolving the case with evidence or an **authorized** mapping decision.
+
+This is not hypothetical. Projected from the sample analysis (not yet a measured run), the combination of Q-WEAK-VERIFY = No and the C.6 rule "a primary account established only by a workflow candidate is an unresolved required resource" holds **at least 6 of the 32 public samples**: case_01, 02, 04, 07, 08, 10. Their primary accounts have no grounded link in participant-visible evidence. Evaluation cases with the same pattern are expected but not yet counted.
+
+Handling until authorization:
+
+1. **Run behaviour.** The pipeline writes all non-held rows to a staging file under `runs/`. It writes the root `output.csv` **only** when the held count is 0. Otherwise it exits non-zero and prints the held cases with reasons. No partial or padded `output.csv` is produced.
+2. **Reporting.** The held count, the reasons per case (`REQUIRED_RESOURCE_UNRESOLVED`, `UNSURE_INTENT`, `IDENTITY_UNRESOLVED`, `POLICY_GAP`, `RETAINED_RECORD_MISSING`, `CATEGORY_AMBIGUOUS`, `ERROR`), and the evidence gaps are listed in the run summary and in `evaluation_report.md`.
+3. **Escalation.** Before the final submission run, the user is presented with the held-case list and decides one of the following:
+   - (a) authorize an explicit, documented mapping policy for each reason class;
+   - (b) authorize additional evidence work, e.g. the media cache for PNG-only links;
+   - (c) accept that `output.csv` cannot be generated.
+
+   No option is applied without that authorization. The output schema is never changed.
+
+#### A.8.4 Plan text not yet aligned with these decisions
+
+These passages predate the decisions above. They will be updated during the cross-section alignment pass. **They were not edited in this revision.**
+
+| Location | Current text | Should reflect |
+|---|---|---|
+| C.6 | "Whether a compliant workflow candidate may appear as a verification step … is decision Q-WEAK-VERIFY. Default: not emitted." | Decided **No** (A.8.1) |
+| C.7, B.4.1 | `late_inner_linking` "default is decided under Q-LATE-LINK" | Decided **Yes, link-only** |
+| B.1.3 | "Choosing the provider, model and key is a user decision (Q-MEDIA-PROVIDER)" | OpenAI preferred, with the two preconditions |
+| B.2 layout table | `docs/` "Inclusion is Q-DOCS-ZIP" | Excluded; repository-only |
+| A.4.5, B.3 diagram, B.3.3 | "held … written to `output.csv` only after an explicit, documented decision" | Add the A.8.3 run behaviour (staging file, non-zero exit, escalation) |
+| A.9, B.8, C.9, D.6 | Lists of pending cross-section alignments | Unchanged; still pending |
+| I (R1, R3, R16, R17) and J | Older risk and gate wording | Reference A.8.1 decisions and the A.8.3 blocking gate |
 
 ### A.9 Required alignment of Sections B–J (not yet edited)
 
@@ -1209,73 +1268,428 @@ existence_by_omission(R, case):
 
 ## D. Policy engine (M4)
 
-### D.1 Category classification [PROPOSAL; mapping evidence FACT]
+Section D decides **which policy treatment applies** to each in-scope resource. It does not decide whether a resource belongs to the subject (Section C) or what the resource's state is (M6). The engine keeps four decisions separate, and each has its own recorded basis:
 
-Classification precedence. The first rule that yields a category wins, and its basis is recorded.
+| Decision | Owner | Input | Output | May use workflow activities? |
+|---|---|---|---|---|
+| 1. Identity / scope | M5 (C.5–C.6) | links | `ScopeDecision` | Only as `WORKFLOW_CANDIDATE` (C.6), never as proof |
+| 2. Category | M4 (D.1) | observations of the resource | `category: Conclusion` | Only inside tie-breaker T-WF (D.1.3) |
+| 3. Policy treatment + condition | M4 (D.2) | category + condition evidence | `Treatment` + `condition: Conclusion` | No |
+| 4. State / verdict | M6 (B.4.2) | admissible observations | dimensions + `Verdict` | No (activities are claims) |
 
-1. Explicit `record_type` [FACT values: USER_PROFILE, ANALYTICS_PROFILE, BACKUP_ARCHIVE, DATA_FLOW, SEARCH_INDEX_ENTRY, SECURITY_AUDIT_LOG, SUPPORT_MESSAGE, USER_EXPORT, LEGAL_HOLD_RECORD, SUPPORT_ATTACHMENT].
-2. Collection/table semantics:
+Every decision carries `basis`, `confidence`, `evidence: [EvidenceRef]`, and `conflicts: [Signal]`, so each can be audited independently.
 
-   | Collection/table | Category |
-   |---|---|
-   | `customer_profiles*` | USER_PROFILE |
-   | `customer_search_documents`, `search_documents_primary` | SEARCH_INDEX_ENTRY |
-   | `customer_analytics_*` with metrics/cohort fields | ANALYTICS_PROFILE |
-   | `support_conversations`, `support_records`, `tickets` with message text/excerpt | SUPPORT_MESSAGE |
-   | `ticket_attachments`, `attachment_pii_scan`, `storage_class=ticket_attachment`, customer-uploaded document | SUPPORT_ATTACHMENT |
-   | `customer_exports`, `customer_export_jobs` | USER_EXPORT |
-   | `connector_*` | DATA_FLOW |
-   | `backup_*` | BACKUP_ARCHIVE |
-   | `security_audit_*` | SECURITY_AUDIT_LOG |
-   | `retained_order_records` | LEGAL_HOLD_RECORD |
-   | `deleted_customer_references` | ACCOUNT_TOMBSTONE |
+Labels follow the document convention: [REQ], [FACT], [PROPOSAL], [ASSUMPTION], [UNRESOLVED].
 
-3. Content features. Example: a `contact_lookup` with `email_opt_in` keyed only by an identifier hash has no metrics, so it is **not** ANALYTICS_PROFILE. It is SECONDARY_IDENTIFIER (rule_02) or MARKETING_PROFILE (rule_10); both DELETE [FACT: case_12].
-4. Workflow operation hint: the `deletion_worker` action type on the resource. It is a claim, used only as a tie-breaker. [FACT] It matches the expected remediation in all 32 samples.
-5. Resource-ID prefix: last resort, low confidence, logged.
+### D.1 Category classification
 
-### D.2 Rule → action mapping [FACT: `deletion_rules.csv`]
+#### D.1.1 Signals and tiers
 
-| Rule | Category | Condition (as written) | Action | Finding if violated | Remediation | Final verification |
-|---|---|---|---|---|---|---|
-| rule_01 | USER_PROFILE | Always | DELETE | REMAINING_RECORD | DELETE_RECORD | VERIFY_RECORD_ABSENT |
-| rule_02 | SECONDARY_IDENTIFIER | Always | DELETE | REMAINING_RECORD | DELETE_RECORD | VERIFY_RECORD_ABSENT |
-| rule_03 | SEARCH_INDEX_ENTRY | Always | DELETE | REMAINING_RECORD | DELETE_RECORD | VERIFY_RECORD_ABSENT |
-| rule_04 | CACHE_ENTRY | Always | DELETE | REMAINING_RECORD | DELETE_RECORD | VERIFY_RECORD_ABSENT |
-| rule_05 | SUPPORT_MESSAGE | shared customer/agent/order context must be retained | REDACT | EXPOSED_PII | REDACT_RECORD | VERIFY_RECORD_REDACTED |
-| rule_06 | SUPPORT_ATTACHMENT | belongs only to the deletion subject | DELETE | REMAINING_RECORD | DELETE_RECORD | VERIFY_RECORD_ABSENT |
-| rule_07 | ANALYTICS_PROFILE | still attributable to a user | ANONYMIZE | EXPOSED_PII | ANONYMIZE_RECORD | VERIFY_RECORD_ANONYMIZED |
-| rule_08 | PRODUCT_TELEMETRY | still attributable | ANONYMIZE | EXPOSED_PII | ANONYMIZE_RECORD | VERIFY_RECORD_ANONYMIZED |
-| rule_09 | USER_EXPORT | Always | DELETE | REMAINING_RECORD | DELETE_RECORD | VERIFY_RECORD_ABSENT |
-| rule_10 | MARKETING_PROFILE | Always | DELETE | REMAINING_RECORD | DELETE_RECORD | VERIFY_RECORD_ABSENT |
-| rule_11 | EMAIL_DELIVERY_LOG | contains a user email | REDACT | EXPOSED_PII | REDACT_RECORD | VERIFY_RECORD_REDACTED |
-| rule_12 | SECURITY_AUDIT_LOG | within retention period | RETAIN | — | — | VERIFY_RECORD_PRESENT |
-| rule_13 | LEGAL_HOLD_RECORD | legal hold active | RETAIN | — | — | VERIFY_RECORD_PRESENT [ASSUMPTION] |
-| rule_14 | BACKUP_ARCHIVE | restore access can be blocked | RETAIN + block restore | REPORT_RESTORE_RISK | BLOCK_RESTORE | VERIFY_RESTORE_BLOCKED |
-| rule_15 | ACCOUNT_TOMBSTONE | account deleted; only stable user_id needed | REDACT | EXPOSED_PII | REDACT_RECORD | VERIFY_RECORD_REDACTED |
-| (none) | DATA_FLOW (connector/sync/import) | — | disable | REPORT_ACTIVE_DATA_FLOW | DISABLE_DATA_FLOW | VERIFY_DATA_FLOW_DISABLED |
+A **signal** is one piece of evidence suggesting a category:
 
-[FACT] The data-flow row has no rule in `deletion_rules.csv`; the treatment is taken from the operation table and sample answers (case_11, 15, 18, 20, 26–30).
+`Signal{category, tier, source: EvidenceRef, observed_at, detail}`
 
-### D.3 Category-specific evaluation [PROPOSAL; FACT where noted]
+| Tier | Signal type | Examples [FACT where observed] | Grounded? |
+|---|---|---|---|
+| T1 | Explicit `record_type` field | Handover TXT, ledgers, `operational_record_history`, `record_lookup` logs. Values seen: USER_PROFILE, SEARCH_INDEX_ENTRY, ANALYTICS_PROFILE, SUPPORT_MESSAGE, SUPPORT_ATTACHMENT, USER_EXPORT, SECURITY_AUDIT_LOG, LEGAL_HOLD_RECORD, BACKUP_ARCHIVE, DATA_FLOW | yes |
+| T2 | **Specific** collection, table or event semantics | `ticket_attachments`, `storage_class=ticket_attachment`, `attachment_pii_scan`/`attachment_scan_started`, `support_conversations`, `message_pii_scan`, `customer_analytics_reports` (with metrics/cohort), `customer_search_documents`, `customer_profiles*`, `customer_export_jobs`/`customer_exports`, `connector_*`, `backup_*`, `security_audit_*`, `retained_order_records`, `deleted_customer_references`, `contact_lookup` / `legacy_contact_index` (D.3.1) | yes |
+| T3 | **Generic** container | Inventory `support_records` (every support item is forced into one schema with `message_excerpt`) and service-export `tickets`. [FACT] `support_2315` appears as `support_records` in evidence_87 and as `ticket_attachments` in evidence_12. | yes, weak |
+| T-WF | `deletion_worker` operation type on the resource (DELETE / REDACT / ANONYMIZE) | activity rows | **no: a claim** |
+| T-PFX | Resource-ID prefix (`support_`, `analytics_`, …) | — | **no: naming convention** |
 
-- **Support message vs attachment.** REDACT when the record is a conversation/ticket with shared context (`message_text`, `message_excerpt`, `message_pii_scan`). DELETE when it is an attachment/file belonging only to the subject (`ticket_attachments`, `attachment_pii_scan`, customer-uploaded PDF, `record_type=SUPPORT_ATTACHMENT`).
-  - **[UNRESOLVED]** A support *replica/legacy-contact* copy (case_10, `support_replica.log`) was expected DELETE. Proposal: classify as SECONDARY_IDENTIFIER copy, using the workflow hint as tie-breaker.
-  - Redacted state = all `requester_*` / name / email / phone null or `[REDACTED]`. A retained `customer_reference=user_NN` is acceptable [FACT: case_26–28].
-- **Email delivery logs / cache / telemetry / marketing.** [FACT] No text-evidence observation exists for `email_delivery_*`, `cache_*`, `telemetry_*`. `marketing_001` and `object_19` appear only in screenshots and `LINK_RESOURCE_IDENTITY`. Handled by the same machinery. With no admissible observation they are UNOBSERVED (no finding, see E).
-- **Analytics.** ANONYMIZED iff `user_id/customer_reference/email/phone/email_hash` are all null or the result is `ANONYMIZED`. EXPOSED if any is non-null or the result is `IDENTIFIABLE`.
-- **Security audit records.** RETAIN while `retention_until > audit_at` [FACT: all observed are 2031+]. **[UNRESOLVED]** An expired record makes the rule_12 condition false and no rule applies; flag, emit no step.
-- **Legal holds.** `legal_hold_*` with `subject_reference`, `retained_until` [FACT, 20 mentions]. RETAIN → VERIFY_RECORD_PRESENT [ASSUMPTION: no sample contains one]. Register PDF rows without a `resource_id` produce no step [FACT: case_08].
-- **Backups.** `restore_allowed=1/true`, `eligible=true & deletion_block=false`, or handover result `ACTIVE` → RESTORABLE → REPORT_RESTORE_RISK. `restore_allowed=false/0` or `BLOCKED` → compliant. The archive itself is **never** deleted.
-- **Data flows / sync / import.** `enabled=true`, `ACTIVE`, or `connector_heartbeat enabled=true` → ACTIVE. `enabled=false/stopped` or `DISABLED` → compliant.
-  - [FACT] `SYNC_RECORD` / `RESTORE_BACKUP` activities are claims of past copying. They justify looking for the recreated copy; the finding comes from the copy's observed presence (case_05, case_10).
-  - **[UNRESOLVED]** `RESTORE_BACKUP` (1 row: `backup_9287` repopulated `search_4882`). Proposal: if both resources are in scope and the backup is still restorable at cutoff → RESTORE_RISK + REMAINING for the repopulated record if observed present.
-- **Tombstones.** REDACTED iff name/email/phone/email_hash are all null and the stable reference is kept [FACT: case_31/32].
-- **Retained record missing.** **[UNRESOLVED]** No operation can express "a required retained record is absent". Proposal: do not emit an invented step; log it, and do not mark COMPLETE solely on other evidence without noting it in the explain trace.
+Each signal maps to a category through one table in `config.py` (`CATEGORY_SIGNALS`). Tests are generated from that table.
 
-### D.4 Remediation dependency order [REQ + FACT]
+#### D.1.2 Resolution algorithm (deterministic)
 
-The operation-table order (DISABLE → BLOCK → DELETE → REDACT → ANONYMIZE) already satisfies "disable flows and block restores before changing dependent records". [FACT] Every sample's remediation follows the plain table order. The "downstream copies before source" rule is satisfied implicitly because primary and copy share one `resource_id`. **[UNRESOLVED]** No sample shows a cross-resource dependency that would override the table order; none will be implemented unless observed.
+```text
+classify(R):
+  S = all signals for R from observations admissible for STATE at audit_at   # C.7
+      (+ T-WF claims with event_time <= audit_at; + T-PFX)
+  grounded = [s for s in S if s.tier in {T1, T2, T3}]
+  if not grounded:
+      return Conclusion(UNKNOWN, reason=CATEGORY_UNGROUNDED, conflicts=S)   # prefix/workflow alone never decide
+  top = min tier present in grounded            # T1 strongest
+  cats = {s.category for s in grounded if s.tier == top}
+  if len(cats) == 1:
+      result = the single category; confidence = HIGH if top in {T1,T2} else MEDIUM
+  elif same_treatment_chain(cats):              # e.g. SECONDARY_IDENTIFIER vs MARKETING_PROFILE (both DELETE)
+      result = lexicographically smallest category in cats; confidence = MEDIUM; note TREATMENT_EQUIVALENT
+  else:
+      result = tie_break_T_WF(cats, S)          # D.1.3; may return UNKNOWN
+  record every signal whose category != result as a conflict (all tiers, including T-WF and T-PFX)
+  return result
+```
+
+Rules:
+
+- **Lower tiers never override higher tiers.** A T3 `support_records` row never overrides a T2 `ticket_attachments` row. A T-WF claim never overrides any grounded signal.
+- **Time.** Signals from all admissible observations count. A category is a property of the record type and is not expected to change over time. If two T1/T2 signals disagree at different times, that is a conflict and is not resolved by recency. [FACT: no such T1/T2 disagreement in current data.]
+- **Prefix (T-PFX)** is only a consistency check. A mismatch between prefix and category is recorded as a conflict (e.g. the `analytics_9914` contact lookup, D.3.1) but changes nothing.
+
+#### D.1.3 Tie-breaker T-WF (the only permitted use of workflow hints)
+
+`tie_break_T_WF(cats, S)` returns a category only if **all** of the following hold:
+
+1. Two or more grounded signals at the **same** top tier disagree, so grounded evidence already narrowed the choice to the set `cats`.
+2. Exactly one admissible T-WF claim exists for R, and its operation maps to exactly one category chain within `cats`.
+3. The case-level identity link of R is not itself a `WORKFLOW_CANDIDATE`. Workflow hints may not both place a resource in scope and choose its category.
+
+When it succeeds: confidence = LOW, basis `TIE_BREAK_WORKFLOW_CLAIM`. Otherwise it returns `UNKNOWN(CATEGORY_AMBIGUOUS)`. A workflow hint is therefore never the sole basis of a category decision.
+
+#### D.1.4 Effect of ambiguity
+
+- `category = UNKNOWN` (reason `CATEGORY_AMBIGUOUS` or `CATEGORY_UNGROUNDED`) means the treatment is unknown, so the verdict is `UNKNOWN` (B.4.3).
+- Consequences:
+  - no finding is emitted, because the operation cannot be chosen;
+  - the resource stays in `REQ(case)`, so the A.4.5 gate blocks COMPLETE and the case is held;
+  - **there is no default category**, in particular none whose treatment would make the resource compliant.
+- LOW-confidence categories (T-WF tie-break) are allowed but reported. The evaluation report lists each one.
+
+### D.2 Treatments and conditions
+
+#### D.2.1 Single authoritative table
+
+The category → treatment chain is **`TREATMENTS` in A.3.2** (`config.py`). Section D adds the **condition definitions** below as `CONDITIONS` in the same file. No other module restates either table. Unit tests and validator L4 (A.5) are generated from these two tables.
+
+#### D.2.2 Supplied rules vs supplemental mappings
+
+| Source | Entries | Status |
+|---|---|---|
+| `deletion_rules.csv` rule_01 … rule_15 | 15 categories × required action | **Supplied policy [REQ]**. M1 validates that every row has a `TREATMENTS` entry. |
+| `DATA_FLOW` (connectors / sync / import jobs) | No row in `deletion_rules.csv` [FACT] | **Supplemental, challenge-specific mapping [PROPOSAL]**. Derived from explicit requirements, not from sample outputs. |
+
+Basis of the DATA_FLOW mapping:
+
+- problem_statement: "no active sync, import, or restore path can recreate the data";
+- AGENTS §6.4 defines `REPORT_ACTIVE_DATA_FLOW / ACTIVE`, `DISABLE_DATA_FLOW / DISABLED` and `VERIFY_DATA_FLOW_DISABLED / DISABLED`.
+
+Mapping for DATA_FLOW:
+
+- finding `REPORT_ACTIVE_DATA_FLOW` (state ACTIVE) when the flow is ENABLED;
+- remediation `DISABLE_DATA_FLOW` (DISABLED);
+- verification `VERIFY_DATA_FLOW_DISABLED` (DISABLED).
+
+It is marked `source="SUPPLEMENTAL"` in `TREATMENTS`. No dataset file is modified, and no operation, phase or state is added.
+
+Scope: the mapping applies only to flows linked to the subject (C.5, e.g. `customer_email` / `customer_reference` of the connector). A flow serving many customers with no subject link is not in scope.
+
+#### D.2.3 Formal condition definitions
+
+Every condition evaluates to `TRUE | FALSE | UNKNOWN` at `audit_at`, using only observations admissible for state (C.7). A `FALSE` result means the supplied rule **does not apply**. That is **not** compliance (D.2.4).
+
+| Rule | Condition text | Evidence fields and accepted values | TRUE | FALSE | UNKNOWN |
+|---|---|---|---|---|---|
+| 01–04, 09, 10 | Always | — | always | — | — |
+| 05 SUPPORT_MESSAGE | shared customer, agent or order context must be retained | `ticket_id`; order reference (`ORD-…`) or order/delivery wording in `message_text`/`message_excerpt`; agent/bot sender; another subject's identifiers in the record | any indicator present | explicit evidence that the conversation contains only subject-owned content and no ticket/order/agent context (none observed) | record unobserved, or text not available |
+| 06 SUPPORT_ATTACHMENT | belongs only to the deletion subject | `uploaded_by` / owner = subject identifier, and no other subject's identifier in the record; a catalog claim "belongs only to … no other subject" counts as supporting context, not proof | subject owner and no other subject | another subject's identifier present | owner field missing |
+| 07 ANALYTICS_PROFILE, 08 PRODUCT_TELEMETRY | still attributable to a user | Identifier slots: `user_id`/`customer_reference`, `email`, `phone`, `email_hash`, plus free-text identifiers. Semantics in D.3.3. | any slot populated with a subject identifier | all four slots observed cleared (D.3.3) | any slot not observed |
+| 11 EMAIL_DELIVERY_LOG | log contains a user email | recipient / to / email fields and free text | subject email present | email fields observed cleared | unobserved |
+| 12 SECURITY_AUDIT_LOG | within the supplied retention period | `retention_until` (ISO-8601) | `retention_until > audit_at` | `retention_until <= audit_at` | field not observed |
+| 13 LEGAL_HOLD_RECORD | a supplied legal hold is active | `retained_until`; release / ended signals (none observed) | `retained_until > audit_at` and no admissible release signal | `retained_until <= audit_at`, or an admissible release signal | `retained_until` not observed |
+| 14 BACKUP_ARCHIVE | restore access can be blocked | absence of evidence that blocking is impossible | default TRUE [ASSUMPTION: the dataset contains no signal stating that blocking is impossible] | explicit evidence that blocking is impossible (none observed) | — |
+| 15 ACCOUNT_TOMBSTONE | account deleted and only the stable user_id is needed | `account_status`; the subject's primary-account verdict | `account_status=DELETED`, or the primary account is ABSENT | `account_status` ACTIVE | neither observed |
+
+Facts relevant to these conditions:
+
+- [FACT] All observed `retention_until` values are 2031-12-31 to 2034-09-30. All `retained_until` values are 2033-12-31. All of them are later than every `audit_at` (max 2026-10-01).
+- [FACT] The only legal-hold signal besides dates is `access="allowed"`. It is not a release signal.
+
+Missing or conflicting condition evidence:
+
+- **Field not observed** → `UNKNOWN(CONDITION_UNKNOWN)`.
+- **Two admissible observations at the same observation time disagree** → `UNKNOWN(CONFLICTING_OBSERVATIONS)`.
+- **Different times** → the latest admissible value wins, and the earlier ones are recorded as `SUPERSEDED`.
+- Indicator lists (rule_05 context indicators, rule_14 default) are [ASSUMPTION]s. They are listed in `CONDITIONS` with that label.
+
+#### D.2.4 When a condition is FALSE or UNKNOWN
+
+| Condition result | Meaning | Verdict | Effect |
+|---|---|---|---|
+| TRUE | Supplied rule applies | per treatment | normal |
+| FALSE | The supplied rule for this category does not apply, and the rules give **no** alternative action | `UNKNOWN(POLICY_GAP)` | Not compliant by default. Resource stays in `REQ(case)`, so the gate blocks COMPLETE and the case is held. Reported. |
+| UNKNOWN | Condition cannot be evaluated | `UNKNOWN(CONDITION_UNKNOWN)` | same |
+
+`POLICY_GAP` and `CONDITION_UNKNOWN` are added to the B.4.3 uncertainty list. That is a cross-section alignment item, D.6.
+
+### D.3 Category-specific evaluation
+
+#### D.3.1 Support records: message, attachment, legacy/replica copy (Problem D5)
+
+| Category | Grounded criteria (T1/T2) | Treatment |
+|---|---|---|
+| SUPPORT_ATTACHMENT | `record_type=SUPPORT_ATTACHMENT`; collection `ticket_attachments`; `storage_class=ticket_attachment`; events `attachment_scan_started` / `attachment_pii_scan`; a document whose content shows customer upload of a file (e.g. PDF "uploader customer", file properties) | rule_06 DELETE (if the D.2.3 condition is TRUE) |
+| SUPPORT_MESSAGE | `record_type=SUPPORT_MESSAGE`; collection `support_conversations`; event `message_pii_scan` / `message_read`; `support_ticket_read` with `requester_*` fields | rule_05 REDACT (if TRUE) |
+| SECONDARY_IDENTIFIER [ASSUMPTION] | Contact/identifier indexes: source `legacy_contact_index`, `contact_query_*`, `contact_lookup_*` records keyed by an identifier, with no conversation text and no file | rule_02 DELETE |
+| T3 only (`support_records`, `tickets`) | Generic container. By itself it does not decide message vs attachment. | Combined per D.1.2. If T3 is the only grounded tier and gives `SUPPORT_MESSAGE`-like fields (`message_excerpt`), it yields SUPPORT_MESSAGE with confidence MEDIUM. |
+
+- [FACT] 7 support resources carry both message-type and attachment-type signals, e.g. `support_2315`: a T3 `support_records` excerpt plus a T2 `ticket_attachments` row. Under D.1.2 the T2 attachment signal wins, and the T3 excerpt is recorded as a conflict.
+- The legacy-contact mapping to SECONDARY_IDENTIFIER is an [ASSUMPTION] based on record content (an identifier index entry, not a message or file). It is **not** based on the workflow's DELETE claim for that resource. Samples are consistent with it (case_10 `support_002`, case_12 `analytics_9914`), but they are a check, not the reason.
+- If evidence cannot distinguish the categories, the result is `CATEGORY_AMBIGUOUS` → UNKNOWN → completeness gate (A.4.5).
+
+#### D.3.2 Unobserved categories: email delivery, cache, telemetry, marketing, object storage (Problem D6)
+
+- [FACT] No text evidence contains observations of `email_delivery_*`, `cache_*` or `telemetry_*`. `marketing_001` and `object_19` appear only in screenshots and `LINK_RESOURCE_IDENTITY` activities. Their activity rows (`SEND_EMAIL`, `REFRESH_CACHE`, `CREATE_EXPORT`, …) never name a subject.
+- Such a resource enters scope only via C.5 links. Activities that merely mention the resource never create a link.
+- If in scope, the verdict is computed from admissible observations only. **"Not observed" is `UNKNOWN(NO_ADMISSIBLE_OBSERVATION)`, never ABSENT** (A.4.2). A `DELETE_RECORD SUCCESS` activity or a `LINK_RESOURCE_IDENTITY` activity is a claim and leaves the verdict UNKNOWN.
+- An in-scope unobserved resource is a member of `REQ(case)`. It therefore **blocks COMPLETE** (held). In an INCOMPLETE case it appears only as a future verification check, never as a finding (no proof of violation).
+- Images become observations only through the hash-verified media cache (B.1.3). Until the cache exists, image-only resources are `EVIDENCE_GAP`.
+
+#### D.3.3 Analytics and telemetry anonymization semantics (Problem D7)
+
+Identifier **slots** checked:
+
+| Slot | Field names accepted |
+|---|---|
+| reference | `user_id` or `customer_reference` |
+| email | `email` |
+| phone | `phone` |
+| hash | `email_hash` |
+| free text | any free-text field |
+
+Slot state per observation:
+
+| Slot state | Meaning |
+|---|---|
+| `POPULATED` | field present with a non-null value, other than `[REDACTED]` / empty |
+| `CLEARED` | field present with `null`, `"null"`, empty or `[REDACTED]` |
+| `NOT_OBSERVED` | field absent from this observation's shape |
+
+[FACT] Analytics observation shapes differ:
+
+- 145 + 89 JSON/SQL records and 39 log records expose all four slots;
+- 19 log records expose only `email` and `phone`;
+- 53 observations expose no slot.
+
+So **missing ≠ null**.
+
+Rules:
+
+1. **ANONYMIZED (compliant).** Every slot is `CLEARED`, using the latest admissible observation per slot, with no later observation `POPULATED`. Slots may be proven by different observations of the same resource, provided none is superseded by a later populated value.
+2. **EXPOSED (violation).** Any slot is `POPULATED` with a value associated with the subject (C.4) in the latest admissible observation for that slot. A populated value belonging to someone else is a C.5 conflict, not exposure of this subject.
+3. **Field-level evidence outranks labels.** A result label `ANONYMIZED` in an observation where any slot is `POPULATED` is recorded as `CONTRARY` evidence, and rule 2 applies. [FACT: 0 such contradictions in current data.]
+4. **Label with field context.** The handover form `ANALYTICS_PROFILE | ANONYMIZED | no direct identifier` states the identifier column's observed value, so it counts as all slots `CLEARED` for that observation [ASSUMPTION]. A bare label with no field context is `UNKNOWN(LABEL_ONLY)`.
+5. Any slot still `NOT_OBSERVED` after combining observations → `UNKNOWN(FIELD_COVERAGE_INCOMPLETE)`.
+
+Check against the public samples' anonymised analytics:
+
+- case_03 readback: 4 slots null.
+- case_04 analytics report: `user_id`, `email`, `phone`, `email_hash` null.
+- case_21, 25–28 service export: 4 slots null.
+
+All satisfy rule 1. This is only a consistency check; the rules above are derived from rule_07, not from the samples.
+
+#### D.3.4 Security audit records after retention expiry (Problem D8)
+
+- The supplied rule_12 requires RETAIN only "within the supplied retention period". `deletion_rules.csv` defines **no** action for a SECURITY_AUDIT_LOG after expiry.
+- Outcome: condition FALSE → `UNKNOWN(POLICY_GAP)` (D.2.4). No step is emitted for the record. It stays in `REQ(case)`, so the gate holds the case and the gap is reported as **Q-RETENTION-EXPIRED**. No action is invented: neither delete nor retain.
+- [FACT] No observed audit record has `retention_until <= audit_at` for any case, so this path is currently not exercised.
+
+#### D.3.5 Legal holds (Problem D9)
+
+Supplied: rule_13 says RETAIN when "a supplied legal hold is active" [REQ]. The following are **[ASSUMPTION]s**, untested by any public sample:
+
+- (a) An active hold's record is verified with `VERIFY_RECORD_PRESENT`. This is the only permitted operation expressing "retained record still exists", and it mirrors rule_12 handling.
+- (b) "Active" is defined as in D.2.3.
+
+| Situation | Verdict | Output effect |
+|---|---|---|
+| Active hold, record PRESENT | COMPLIANT_PROVEN | `VERIFY_RECORD_PRESENT` (cited in COMPLETE; future check in INCOMPLETE) |
+| Active hold, record proven ABSENT | VIOLATION_PROVEN, `RETAINED_RECORD_MISSING` | D.3.9 |
+| Active hold, presence unknown | UNKNOWN | gate holds COMPLETE |
+| Hold expired / released | `UNKNOWN(POLICY_GAP)` | as D.3.4, Q-HOLD-EXPIRED |
+| Hold condition field missing | `UNKNOWN(CONDITION_UNKNOWN)` | gate |
+| Register-only mention (PDF rows `ORD-… / user_NN` without `resource_id`) | context only | no step; the subject's legal-hold resources come only from records with `resource_id` [FACT: disputed-orders register] |
+
+The lack of sample coverage is recorded as a validation gap in the evaluation report. It is not evidence that (a) is right.
+
+#### D.3.6 Backups and restore risk (Problem D10)
+
+Policy (rule_14): the archive is **retained**; restore access must be blocked.
+
+- **DELETE_RECORD is never proposed for a `BACKUP_ARCHIVE`.** The validator rejects it (L4).
+- Required remediation when restorable: `BLOCK_RESTORE` → verification `VERIFY_RESTORE_BLOCKED`.
+
+Current restore capability is read **only from admissible observations** of the backup at `audit_at`:
+
+| Signal (per observation) [FACT: values seen] | Reading |
+|---|---|
+| `restore_allowed ∈ {1, true}` | RESTORABLE |
+| `restore_allowed ∈ {0, false}` | BLOCKED |
+| `eligible=true` and `deletion_block=false` (`restore_candidate_evaluated`) | RESTORABLE |
+| `deletion_block=true` | BLOCKED |
+| handover `BACKUP_ARCHIVE \| ACTIVE` | RESTORABLE |
+| handover `BACKUP_ARCHIVE \| BLOCKED` | BLOCKED |
+| `archive_present=true` | existence only, no restore reading |
+
+Precedence and conflicts:
+
+1. Within **one observation**, if readings disagree (e.g. `restore_allowed=false` with `eligible=true, deletion_block=false`) → `UNKNOWN(CONFLICTING_OBSERVATIONS)` for that observation.
+2. Across observations, the latest admissible observation wins. At the same observation time, disagreement → UNKNOWN.
+3. **Claims are separate.** These activity rows never set `restore_state`:
+   - `CHECK_RESTORE_ACCESS` ("can still be restored");
+   - `BLOCK_RESTORE SUCCESS`;
+   - `RESTORE_BACKUP` (a past restore event).
+
+   They are recorded as `CLAIM` refs. A past restore is evidence that recreation happened once (D.3.7). It is not evidence of current capability.
+4. Log level (`ERROR` on an `eligible=true` line) is ignored [FACT].
+
+#### D.3.7 Recreated resources after restore or synchronisation (Problem D11)
+
+`RESTORE_BACKUP` and `SYNC_RECORD` activities are **investigation triggers**. They name a source and a target. [FACT] `activity_3387`: `backup_9287` "repopulated downstream resource `search_4882`".
+
+```text
+on RESTORE_BACKUP / SYNC_RECORD claim (event_time <= audit_at) with source B and target T:
+  record DependencyEdge(upstream=B, downstream=T, type=RESTORES|REPLICATES, basis=CLAIM(activity_id))
+  T is evaluated like any other candidate:
+     in scope only via C.5 links (the activity is not a link);
+     REMAINING finding only if an admissible observation shows T PRESENT (C.7, A.4.2)
+  B is evaluated independently (D.3.6) at audit_at:
+     RESTORE_RISK finding only if B is RESTORABLE by admissible observation
+```
+
+[FACT] Worked trace (an evaluation-case subject, not a sample):
+
+- evidence_01 (captured 09-15) has trace `tr-0859867` keyed by the subject's email naming `search_4882 result=hit`. That gives a `TRACE_KEY` link, and the resource is PRESENT.
+- Trace `tr-5638333` names `backup_9287 eligible=true deletion_block=false`, so the backup is RESTORABLE.
+- Both findings would arise from evidence, not from the activity.
+
+Representation (no duplicates, no omissions):
+
+- Each resource gets exactly one finding of its own type:
+  - `REPORT_RESTORE_RISK` for B;
+  - `REPORT_REMAINING_RECORD` for T.
+- Each gets exactly one remediation (`BLOCK_RESTORE` for B, `DELETE_RECORD` for T) and one verification.
+- The dependency "block restore before deleting the restored copy" is satisfied by the operation order (idx 5 before idx 6) and checked by D.4.
+- If T is PRESENT but B is BLOCKED: only T's finding. If B is RESTORABLE but T is ABSENT or unknown: only B's finding (T may appear as a future check if in `REQ`).
+
+#### D.3.8 Account tombstones (Problem D12)
+
+[FACT] All 18 tombstone observations expose the same fields: `subject_reference`, `name`, `email`, `phone`, `email_hash`, `account_status`. evidence_52 holds tombstones in both a primary and a failover table.
+
+Slot semantics follow D.3.3: `POPULATED` / `CLEARED` / `NOT_OBSERVED`.
+
+| Outcome | Condition |
+|---|---|
+| COMPLIANT (REDACTED) | `subject_reference` POPULATED (stable reference kept) **and** `name`, `email`, `phone`, `email_hash` all CLEARED, in **every** known copy (replica-aware, C.8.2), using the latest admissible observation per copy |
+| VIOLATION (EXPOSED) | Any prohibited field POPULATED in any copy → `REPORT_EXPOSED_PII` → `REDACT_RECORD` → `VERIFY_RECORD_REDACTED` |
+| UNKNOWN | Any prohibited field NOT_OBSERVED in some copy (`FIELD_COVERAGE_INCOMPLETE`), or conflicting same-time observations |
+| Stable reference missing | `subject_reference` CLEARED. Over-redaction of a reference that rule_15 says to keep: no permitted operation restores it, so `RETAINED_RECORD_MISSING` (D.3.9) |
+
+#### D.3.9 Missing required retained record (Problem D13)
+
+**Internal representation:**
+
+- verdict `VIOLATION_PROVEN`, reason `RETAINED_RECORD_MISSING`;
+- `expressible=False`: no finding operation exists;
+- the evidence refs proving absence.
+
+Applies to:
+
+- an audit record within retention;
+- an active legal hold;
+- a tombstone reference (D.3.8);
+- a backup archive proven deleted.
+
+**Reconciliation with the output contract and the A.4.5 gate:**
+
+1. No new operation, phase or state is invented [REQ: AGENTS §6.4].
+2. The case **cannot be COMPLETE**: a required retained record is not available [REQ: A.4.1].
+3. If the case has other expressible findings, it is `INCOMPLETE` with those findings. Whether its verification phase should include `VERIFY_RECORD_PRESENT` for the missing record is part of Q-RETAIN: listing it would be a check that no listed remediation can satisfy.
+4. If the case has **no** other expressible finding, the permitted schema cannot faithfully express it. The case is **held** with `RETAINED_RECORD_MISSING`, and final output generation is blocked until the user decides (**Q-RETAIN**). It is never silently emitted as COMPLETE.
+
+[FACT] No retained record proven absent has been observed in public samples, so this path is not yet exercised.
+
+### D.4 Remediation dependencies (Problem D14)
+
+Output **sorting** (A.2, A.3.1) and remediation **dependencies** are separate structures, validated separately.
+
+#### D.4.1 Dependency edges
+
+```python
+@dataclass(frozen=True)
+class DependencyEdge:
+    upstream: str          # resource whose remediation must come first
+    downstream: str
+    type: str              # RECREATES (flow -> record), RESTORES (backup -> record),
+                           # REPLICATES (source -> copy), DERIVED_FROM (source -> derived record)
+    basis: EvidenceRef     # observation (e.g. source_resource_id, connector target) or CLAIM (activity)
+    rule: str              # D1 or D2
+```
+
+Edges are created **only from explicit evidence or claims**:
+
+| Edge | Created from |
+|---|---|
+| `RESTORES` | `RESTORE_BACKUP` activities |
+| `REPLICATES` | `SYNC_RECORD` activities naming source and target |
+| `DERIVED_FROM` | `source_resource_id` foreign keys [FACT: 3 rows] |
+| `RECREATES` | a connector whose observation names the subject and a target system |
+
+The connector-to-target-system mapping from `connector_name` (e.g. `analytics_identity_bridge` → `analytics_platform`, `support_profile_sync` → `support_platform`) is an [ASSUMPTION] table in `config.py`.
+
+Claims may create edges because edges affect only ordering validation, never scope or state.
+
+**Copies.**
+
+- A replica copy sharing the same `resource_id` is a `copy_location` inside one resource (C.8). [FACT: this is the only pattern seen.]
+- Copies with **different** resource IDs are linked only through an explicit `REPLICATES` / `DERIVED_FROM` edge. Equality of resource IDs is never assumed.
+
+#### D.4.2 Rules and validation
+
+- **D1** [REQ: AGENTS §6.5]: for every edge of type `RECREATES` or `RESTORES` where both ends have remediation, the upstream remediation (`DISABLE_DATA_FLOW` / `BLOCK_RESTORE`) must precede the downstream record change in the emitted step list.
+  - Operation indices 4–5 always sort before 6–8, so D1 holds by construction.
+  - Validator L4 still checks every edge and fails on violation. This guards against future table changes.
+- **D2** [REQ: AGENTS §6.5]: for `REPLICATES` / `DERIVED_FROM` edges where both ends get a record-change remediation, the downstream copy should be processed before its source.
+  - If the A.2 sort places the source first (e.g. `account_service` < `search_service`), **the output follows the A.2 sort**, the explicit ordering contract.
+  - The pair is reported as `DEPENDENCY_ORDER_CONFLICT` in the run summary and the evaluation report (Q-DEP).
+  - Steps are never reordered against the contract.
+- Unrelated resources (no edge) have no dependency constraint.
+
+#### D.4.3 Tests
+
+- **Cross-resource:**
+  - flow + record both remediated → D1 holds;
+  - backup + restored search record → BLOCK before DELETE;
+  - edges created from activity claims do not create scope links.
+- **Multiple copies:**
+  - same `resource_id` in primary + replica → one resource, one step set;
+  - replica-only presence → REMAINING;
+  - different IDs with an explicit `REPLICATES` edge → two resources plus one edge.
+- **Conflicting order:**
+  - a `DERIVED_FROM` pair whose sort order puts the source first → output order unchanged, `DEPENDENCY_ORDER_CONFLICT` reported;
+  - a crafted step list violating D1 → validator L4 error.
+- **Prohibited actions:** DELETE on BACKUP_ARCHIVE, SECURITY_AUDIT_LOG or LEGAL_HOLD_RECORD → L4 error.
+
+### D.5 Section D validation checklist
+
+| Requirement | Where satisfied |
+|---|---|
+| Each condition has a definition and an uncertainty path | D.2.3, D.2.4 |
+| Category conflicts and weak classifications handled explicitly | D.1.2–D.1.4 |
+| Unknown state cannot become compliance | D.1.4, D.2.4, D.3.2, D.3.3 rule 5, D.3.8, D.3.9 |
+| Activities never prove state | D.3.2, D.3.6 item 3, D.3.7 |
+| Consistent retention, backup, restore, tombstone and data-flow treatment | D.2.2, D.3.4–D.3.9 |
+| Dependencies validated independently of sorting | D.4 |
+| No new operations, phases or states | D.2.2, D.3.9; all outputs use A.3.1 rows only |
+| Identity, category, policy and state kept separate | D intro table, D.1.3 rule 3 |
+
+### D.6 Contradictions that remain outside Section D (not edited)
+
+Section D is consistent with the revised A.3.2, A.4.2–A.4.5, B.4 and C.5–C.8. The following statements elsewhere still conflict with it or are incomplete. **The full plan is not yet consistent** until they are revised:
+
+| Location | Conflict / gap |
+|---|---|
+| B.4.3 uncertainty list | Missing `POLICY_GAP`, `CONDITION_UNKNOWN`, `FIELD_COVERAGE_INCOMPLETE`, `LABEL_ONLY`, `CATEGORY_UNGROUNDED`, `DEPENDENCY_ORDER_CONFLICT` (a report code, not a verdict reason) |
+| B.5 M4 confidence rule | States that content/workflow classification is accepted when all competing categories share a chain. D.1.2–D.1.3 refines this: tiers, T-WF only as a constrained tie-breaker. B.5 should reference D.1. |
+| A.3.2 `TREATMENTS` | Needs the `source="SUPPLEMENTAL"` marker for DATA_FLOW and the `CONDITIONS` companion table reference (D.2.1–D.2.2) |
+| A.4.3 retained-record table | FALSE condition is described as "not a retained record … no step; logged". D.2.4 makes it `UNKNOWN(POLICY_GAP)` that **blocks COMPLETE**. A.4.3 must be aligned. |
+| A.8 open questions | Add Q-RETENTION-EXPIRED, Q-HOLD-EXPIRED. Q-RETAIN now also covers tombstone reference loss and the verification-step question (D.3.9 item 3). |
+| E (decision pseudocode) | Still uses the old single `state` / `UNOBSERVED` model. It must use D.1 `classify`, D.2.3 conditions, D.2.4, and the D.3.9 held path. |
+| F.2 / F.4 | Citation for condition-dependent verdicts must cite the observation proving both the state and, where relevant, the condition (e.g. `retention_until`). L4 must include D.4 edge checks and the prohibited-action list. |
+| G | Add D.1 tier/conflict tests, D.2.3 condition tests (TRUE/FALSE/UNKNOWN each), D.3.3 slot tests, D.3.6 signal-conflict tests, D.4.3 tests |
+| H | No stage yet for the `CONDITIONS` table and dependency edges |
+| I | R7 (support category) and R8 (contact lookup) should reference D.3.1. R15 (expired retention) should reference D.3.4/D.3.5. R20 (`RESTORE_BACKUP`) should reference D.3.7. Add Q-RETENTION-EXPIRED and Q-HOLD-EXPIRED. |
+| J | Add: no held `POLICY_GAP` / `RETAINED_RECORD_MISSING` / `CATEGORY_AMBIGUOUS` cases without a decision; zero L4 dependency-rule violations |
 
 ---
 

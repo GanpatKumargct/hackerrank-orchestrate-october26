@@ -666,3 +666,225 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T00:16:16Z] Revise IMPLEMENTATION_PLAN Section D (policy engine) per review
+
+User Prompt (verbatim, secrets redacted):
+# Section D — Policy Engine: Problems and Required Fixes
+
+Review and update Section D of `docs/IMPLEMENTATION_PLAN.md`. Keep the changes scoped to Section D unless a cross-section change is explicitly necessary. Do not modify application code, datasets, or `output.csv`.
+
+## D.1 — Category Classification
+
+### Problem D1: Classification precedence can produce incorrect categories
+
+The proposed classifier prioritizes explicit `record_type`, then collection/table semantics, then content features, workflow-operation hints, and finally resource-ID prefixes. Some records may have conflicting signals.
+
+**Required fix:**
+- Define explicit conflict-resolution rules when `record_type`, collection semantics, content fields, and workflow hints disagree.
+- Record the selected category, classification basis, confidence, and any conflicting signals.
+- Treat workflow operations as claims and never allow them alone to override contradictory grounded evidence.
+- Treat resource-ID prefixes as weak fallback evidence, not proof of category.
+- Define what happens when the category remains ambiguous. It must not silently default to a category that permits `COMPLETE`.
+
+### Problem D2: Category classification and identity linking are being mixed
+
+A workflow operation can suggest that a resource should be deleted, redacted, anonymized, or otherwise remediated. That does not establish either the resource's identity or its actual state.
+
+**Required fix:**
+- Keep identity linking, category classification, policy selection, and state assessment as separate decisions.
+- Workflow-operation hints may be used only within a documented tie-breaker rule.
+- Record the basis for each decision so it can be audited independently.
+
+## D.2 — Rule-to-Action Mapping
+
+### Problem D3: Data flows have no explicit rule in `deletion_rules.csv`
+
+The plan states that data flows are handled using the operation table and sample answers, even though there is no corresponding rule in the supplied policy file.
+
+**Required fix:**
+- Explicitly document this as a challenge-specific policy mapping.
+- Keep the distinction between supplied rules and proposed supplemental handling.
+- Define the required finding, remediation, and verification for a data flow.
+- Do not modify the supplied dataset or invent an extra output operation, phase, or state.
+
+### Problem D4: Policy conditions are not fully formalized
+
+Conditions such as “contains a user email,” “still attributable,” “legal hold active,” and “restore access can be blocked” need executable definitions.
+
+**Required fix:**
+- Define each condition using explicit evidence fields, accepted values, and evaluation time.
+- Define how missing or conflicting condition evidence is handled.
+- Keep the category-to-treatment mapping in one authoritative policy table.
+- Derive tests and validation rules from that table to avoid duplicated or inconsistent mappings.
+
+## D.3 — Category-Specific Evaluation
+
+### Problem D5: Support message versus attachment classification is unresolved
+
+The plan proposes redacting shared-context support messages and deleting subject-only attachments. A support replica or legacy-contact copy is unresolved, with workflow hints proposed as a tie-breaker.
+
+**Required fix:**
+- Define the classification criteria for messages, attachments, and legacy/replica copies.
+- Do not use a workflow hint as the sole basis for a consequential category decision.
+- If evidence cannot distinguish the categories, mark the assessment as unknown and apply the completeness gate from the updated Section A.
+
+### Problem D6: Missing observations for email delivery logs, caches, telemetry, marketing, and object storage
+
+The plan notes that some resources have no text-evidence observations and may therefore remain `UNOBSERVED`.
+
+**Required fix:**
+- Distinguish a resource that is not observed from a resource proven absent.
+- Do not infer deletion from a missing observation or from an activity that merely links the resource to a subject.
+- Ensure that an unobserved required resource cannot be silently omitted from completeness evaluation.
+- Apply the updated Section A verdict model: `COMPLIANT_PROVEN`, `VIOLATION_PROVEN`, or `UNKNOWN`.
+
+### Problem D7: Analytics anonymization rules need explicit evidence semantics
+
+The plan considers analytics anonymized when user-identifying fields are null or the result is `ANONYMIZED`.
+
+**Required fix:**
+- Specify which fields must be checked and how missing fields differ from explicitly null fields.
+- Define how contradictory evidence is handled—for example, a result labelled `ANONYMIZED` while an identifying field remains populated.
+- Require evidence supporting the actual anonymized state, rather than accepting a status label without validating relevant fields.
+
+### Problem D8: Expired security-audit retention records have no defined outcome
+
+The plan says that if `retention_until <= audit_at`, no rule applies and no step is emitted.
+
+**Required fix:**
+- Define the policy outcome for expired retention records using the supplied challenge rules.
+- If the supplied rules do not establish the required action after expiry, record the ambiguity rather than inventing a policy.
+- Ensure the absence of an applicable rule does not automatically establish compliance.
+
+### Problem D9: Legal-hold handling is partly assumption-based
+
+The plan assumes legal-hold records should be retained and verified as present, while noting that the public samples do not contain one.
+
+**Required fix:**
+- Label the retention treatment as an assumption until supported by the supplied rules or explicit requirements.
+- Define how an active hold, expired hold, missing hold condition, and missing required retained record are assessed.
+- Do not treat the absence of sample coverage as proof that the rule is correct.
+
+### Problem D10: Backup and restore-risk logic needs conflict handling
+
+The plan treats `restore_allowed=true`, certain eligibility combinations, or a handover result of `ACTIVE` as evidence of restorability. It also says the archive itself must never be deleted.
+
+**Required fix:**
+- Define precedence when these signals disagree.
+- Distinguish evidence of current restore capability from an activity claiming that a restore happened in the past.
+- Require admissible evidence for the backup's state at `audit_at`.
+- Preserve the policy that the archive is retained and restore access is blocked where required; do not propose deleting the archive as remediation.
+
+### Problem D11: Recreated resources after restore or synchronization need consistent treatment
+
+The plan identifies a `RESTORE_BACKUP` activity involving `backup_9287` and `search_4882`, and proposes a restore-risk finding plus a remaining-record finding under certain conditions.
+
+**Required fix:**
+- Treat the activity as a claim that prompts investigation, not proof that the target resource exists.
+- Generate a remaining-record finding only when admissible evidence proves the recreated resource is present and correctly linked to the subject.
+- Assess backup restorability independently at the audit cutoff.
+- Define how the two findings and their remediation dependencies are represented without duplicating or omitting required steps.
+
+### Problem D12: Tombstone compliance needs explicit field-level checks
+
+The plan requires the stable user reference to remain while name, email, phone, and email hash are removed.
+
+**Required fix:**
+- Define how missing fields differ from explicitly null or redacted fields.
+- Verify that the stable reference is retained and that prohibited identifiers are absent.
+- Ensure contradictory evidence or incomplete field coverage produces `UNKNOWN`, not proven compliance.
+
+### Problem D13: Required retained records may be missing, but the output schema cannot directly express that finding
+
+The plan acknowledges that no permitted operation directly represents “a required retained record is absent.”
+
+**Required fix:**
+- Do not invent new operations, phases, or states.
+- Define how the internal policy assessment records a missing required retained record.
+- Reconcile this condition with the output contract and the updated Section A completeness gate.
+- If the permitted output schema cannot faithfully represent the condition, explicitly record the unresolved constraint and require a decision before final output generation. Do not silently mark the case `COMPLETE`.
+
+## D.4 — Remediation Dependency Ordering
+
+### Problem D14: Table order does not prove all dependency requirements are satisfied
+
+The plan assumes that the operation-table order—disable flows, block restores, delete, redact, anonymize—satisfies the dependency requirements. It also assumes downstream copies and source records can share a resource ID.
+
+**Required fix:**
+- Keep output sorting rules separate from remediation dependency rules.
+- Represent resource dependencies explicitly when evidence establishes them.
+- Validate that flows are disabled and restores are blocked before dependent data changes where required.
+- When downstream-copy ordering conflicts with the required output sort order, follow the challenge's explicit output ordering contract and report the dependency conflict separately.
+- Do not assume that primary and replica copies share a resource ID; use explicit relationships and evidence.
+- Add tests for cross-resource dependencies, multiple copies, and conflicting ordering constraints.
+
+## Cross-Section Consistency Requirements
+
+1. Align Section D with the updated Section A verdict model: `COMPLIANT_PROVEN`, `VIOLATION_PROVEN`, and `UNKNOWN`.
+2. Align Section D with the updated Section B data model, including separate record-presence, PII-exposure, flow, restore, retention, and evidence-completeness dimensions.
+3. Ensure Section D does not contradict Section C's identity-linking and cutoff-admissibility rules.
+4. Ensure all findings, remediation, and verification map to permitted output operations and states.
+5. Keep unsupported assumptions and unresolved policy questions explicitly labelled. Do not silently resolve them using sample-output patterns.
+
+## Validation Before Marking Section D Complete
+
+- Each policy condition has a documented definition and uncertainty path.
+- Category conflicts and weak classifications are handled explicitly.
+- Unknown resource states cannot be treated as proven compliance.
+- Activities do not serve as proof of resource state.
+- Retention, backup, restore, tombstone, and data-flow cases have consistent treatment.
+- Remediation dependencies are validated independently from output sorting.
+- No prohibited output operations, phases, or states have been introduced.
+- All Section D changes are reviewed for contradictions with Sections A–C and E–J.
+
+After editing, report the exact Section D subsections changed, unresolved decisions, and any contradictions that remain outside Section D. Do not claim the full plan is consistent until those cross-section contradictions are resolved.
+
+Agent Response Summary:
+Ran read-only probes: analytics identifier-field presence differs by shape (missing vs null is real: 19 log records expose only email/phone, 53 expose none; 0 ANONYMIZED-with-populated conflicts); 7 support resources carry both message and attachment signals (e.g. support_2315 inventory support_records vs bundle ticket_attachments); all retention_until 2031-2034 and retained_until 2033-12-31 exceed every audit_at; backup/flow signal value sets enumerated; all 18 tombstone observations share one field set incl. primary+failover copies; RESTORE_BACKUP target search_4882 and backup_9287 have independent admissible observations in evidence_01. Rewrote only Section D: separated identity/category/policy/state decisions; tiered signal classification with conflict recording, no default category, constrained workflow tie-breaker; DATA_FLOW marked as supplemental mapping; formal TRUE/FALSE/UNKNOWN condition table with POLICY_GAP handling; criteria for message/attachment/legacy copies; unobserved vs absent; slot-based anonymization and tombstone semantics; expired retention and legal-hold paths; backup signal precedence vs claims; restore/sync recreation handling; RETAINED_RECORD_MISSING held path; explicit dependency edges validated separately from sort; checklist and list of remaining contradictions outside D (B.4.3, B.5, A.3.2, A.4.3, A.8, E, F, G, H, I, J).
+
+Actions:
+* Edited docs/IMPLEMENTATION_PLAN.md (Section D replaced; other sections byte-identical)
+* Ran read-only scratchpad probes over the evidence index, handover TXT and system_activity.csv
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
+## [2026-10-25T00:20:47Z] Record user decisions in A.8 decision register
+
+User Prompt (verbatim, secrets redacted):
+My decisions for Section C:
+
+1. Q-WEAK-VERIFY: No. Do not generate verification steps based solely on workflow candidates. Require an independently grounded link or another explicitly approved basis for including the resource in the case.
+
+2. Q-LATE-LINK:** Yes, permit late-captured evidence for identity/scope linking only, under strict documented conditions. It must never establish resource state or serve as state-verification evidence. Preserve provenance and test this separation.
+
+3. **Q-UNDETERMINED:** Keep unresolved cases on an internal held path. Do not invent a new output status or silently map unknown evidence to COMPLETE, INCOMPLETE, or NOT_APPLICABLE. Before final output generation, flag the conflict between held cases and the required 518-row output contract. Do not modify the output schema without authorization.
+
+4. **Q-MEDIA-PROVIDER:** Prefer OpenAI for PNG extraction, subject to confirming the available vision-capable model and approval to transmit the screenshots externally. Preserve image SHA-256, prompt hash, extraction provenance, and deterministic cache validation. Do not fabricate or manually enter extracted facts.
+
+5. **Q-DOCS-ZIP:** Include docs/ only if permitted by the challenge's packaging requirements. Inspect the exact packaging instructions before changing the ZIP contents; if docs/ is not allowed in code.zip, keep it separate if the submission permits that.
+
+Keep workflow candidates distinct from grounded identity links. Do not relax evidence requirements to improve sample matching. Update the decision register and report any remaining contradictions, especially the held-case versus 518-row output requirement. Do not start aligning other sections until these decisions are recorded.
+
+Agent Response Summary:
+Inspected the exact packaging text in README.md, AGENTS.md and problem_statement.md: code.zip's permitted contents are runnable solution, prompts, configuration, README.md and evaluation reports; docs/ is neither listed nor excluded, and the four submission items provide no separate documents slot, so under the user's rule docs/ is excluded from code.zip and stays repository-only. Replaced only A.8 of docs/IMPLEMENTATION_PLAN.md with a decision register: decided items (Q-SORT, Q-REPORTS, Q-WEAK-VERIFY=No, Q-LATE-LINK=link-only, Q-UNDETERMINED=held path, Q-MEDIA-PROVIDER=OpenAI with model-availability and transmission-approval preconditions, Q-DOCS-ZIP=excluded), open items, a blocking-conflict section (held cases vs 518-row contract, projected >=6 held public samples, staging-file/non-zero-exit behaviour and escalation options without schema change), and a list of plan passages not yet aligned. No other sections edited; no API calls made; nothing sent externally.
+
+Actions:
+* Edited docs/IMPLEMENTATION_PLAN.md (A.8 replaced; all other text byte-identical)
+* Ran grep over README.md, AGENTS.md, problem_statement.md and pip show openai (read-only)
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
