@@ -1695,113 +1695,339 @@ Section D is consistent with the revised A.3.2, A.4.2–A.4.5, B.4 and C.5–C.8
 
 ## E. Case decision algorithm
 
-Terminology inside the algorithm:
+Section E combines the contracts already defined into one per-case algorithm. Those contracts are:
 
-- **observed fact**: an admissible `Observation`;
-- **claim**: an `Activity` or `reported_status`;
-- **proposed action**: remediation;
-- **future check**: post-remediation verification.
+- A.4 verdicts and the completeness gate;
+- the A.8 decisions;
+- the B.1.4 three-way intent;
+- the B.4 assessment dimensions;
+- the C.4–C.8 identity, link, admissibility and omission rules;
+- the D.1–D.4 classification, condition and dependency rules.
+
+It introduces no new rules about evidence. Where it needs a rule that does not exist yet, the rule is labelled.
+
+Every value in the algorithm is tagged with one of four kinds. These tags are carried into the explain trace:
+
+| Kind | Meaning | Example |
+|---|---|---|
+| **OBSERVED** | Fact from an observation admissible for state (C.7) | `status_code=404` in evidence_92 |
+| **CLAIM** | Activity row, `reported_status`, `CLASSIFY_REQUEST`, `LINK_RESOURCE_IDENTITY` | `DELETE_RECORD SUCCESS` |
+| **PROPOSED** | Remediation step (future action) | `DELETE_RECORD` on a search entry |
+| **FUTURE_CHECK** | Post-remediation verification (future check) | `VERIFY_RECORD_ABSENT` with `evidence_id=""` |
+
+Only OBSERVED values can prove a state or support a citation.
+
+### E.1 Intent classification (scoped, three-way)
+
+#### E.1.1 Clause analysis
+
+The request text is split into sentences, then into clauses at `,`, `;`, `but`, `and`, `except`, and their equivalents in the five observed non-English languages (pt, es, fr, ja, ko [FACT]). Each clause is assigned at most one **clause type**. Each type requires both a trigger and an **object in scope**:
+
+| Clause type | Trigger | Object required | Examples [FACT where marked] |
+|---|---|---|---|
+| `DELETE_REQUEST` | delete, erase, remove, close, deletion, permanently delete; multilingual equivalents | the account, profile, personal data / information, "me", or records linked to the account | the 17 opening sentences of the evaluation texts [FACT]; case_01–20, 22–24 |
+| `DELETION_FOLLOWUP` | verify, check, confirm, audit, inspect, tell me whether, finish, complete | a **prior or in-progress deletion** of the account or its data ("I deleted my account", "was deleted", "deletion was complete", "my request failed", "the profile is gone") | case_21, 25, 26, 27, 28 [FACT: their expected answers are not NOT_APPLICABLE] |
+| `SCOPE_LIMIT` | keep, retain, may stay, only, except, not (object-scoped) | a **subset** of data: anonymous statistics, backups, security records, the deleted-account reference, a shared conversation, orders/invoices, a named record | case_04, 17, 19, 23, 31, 32; case_28 "do not treat that record as mine" [FACT] |
+| `DELETION_NEGATION` | not asking for deletion, don't/do not delete, do not close, not a request to erase, without removing, keep the account as it is, leave the account active, continue using | the **account, the deletion itself, or "any"/"all" records** | case_533–542 [FACT] |
+| `OTHER_PURPOSE` | correct, change, update, replace, copy of, download, portable format, what information do you hold, stop promotional, reset login, invoices | an account attribute, data copy, marketing communication or login | case_533–542 [FACT] |
+| `MARKETING_ONLY` | remove / unsubscribe / stop + "marketing" / "promotional", **with** an "only" scoping the removal to marketing | marketing lists | case_538 "remove me from marketing lists only" [FACT] |
+
+**Scope of negation and "only".** A negation or "only" applies to the object of its own clause. It does not apply to the whole request.
+
+- "Delete only my account, not my orders" gives `DELETE_REQUEST(account)` and `SCOPE_LIMIT(orders)`. The result is DELETION, with a recorded scope limit.
+- "Remove me from marketing lists only" gives `MARKETING_ONLY`. "Remove" has object *marketing lists*, not the account, so it is not a `DELETE_REQUEST`.
+
+#### E.1.2 Decision table (precedence is explicit; no single pattern decides alone)
+
+| Clauses present | Result |
+|---|---|
+| (`DELETE_REQUEST` or `DELETION_FOLLOWUP`) and no `DELETION_NEGATION` | **DELETION**. `SCOPE_LIMIT` clauses are recorded as case notes. They never change the policy: retention and redaction still come from `deletion_rules.csv`. |
+| `DELETION_NEGATION`, no `DELETE_REQUEST`, no `DELETION_FOLLOWUP` | **NON_DELETION** |
+| (`OTHER_PURPOSE` or `MARKETING_ONLY`), no `DELETE_REQUEST`, no `DELETION_FOLLOWUP` | **NON_DELETION** |
+| (`DELETE_REQUEST` or `DELETION_FOLLOWUP`) **and** `DELETION_NEGATION` | **UNSURE** (contradictory scope) |
+| No typed clause, or unsupported language/script | **UNSURE** |
+
+- `UNSURE` goes to the optional LLM fallback (B.1.4) when it is enabled and a key is present. If the case is still `UNSURE` after that, it is **held** with reason `UNSURE_INTENT` (A.8.3).
+- `NON_DELETION_UNSURE` from the earlier draft is removed. A disabled LLM never produces NON_DELETION.
+
+The intent result restricts what M7 may emit (B.3.1). Identity, scope and state analysis still run for every case and are kept in the explain trace.
+
+#### E.1.3 Intent tests
+
+- All 17 deletion openers and all 5 languages → DELETION.
+- The 10 non-deletion texts (case_533–542) → NON_DELETION.
+- Samples case_21, 25–28 → DELETION via `DELETION_FOLLOWUP`.
+- Samples case_04, 17, 19, 23, 28, 31, 32 → DELETION with recorded `SCOPE_LIMIT`.
+- Synthetic mixed-intent cases:
+
+| Text | Expected |
+|---|---|
+| "delete only my account, not my orders" | DELETION + limit |
+| "close my account but do not delete my invoices" | DELETION + limit |
+| "please delete everything — actually, don't close the account" | UNSURE |
+| "I'm not asking you to keep anything; delete it all" | DELETION. "not … keep" is not a deletion negation. |
+| An empty or unsupported-language text | UNSURE |
+
+- `CLASSIFY_REQUEST` activities are compared to the result in the evaluation report only. They are never inputs.
+
+### E.2 Identity, episode and scope
+
+#### E.2.1 Identity branch
+
+```text
+subj = resolve(case.email)                      # C.4
+if subj is UnresolvedSubject or AmbiguousSubject:
+    trace.note(IDENTITY_UNRESOLVED | IDENTITY_AMBIGUOUS)
+    if intent == NON_DELETION: return emit(NOT_APPLICABLE, [])      # identity irrelevant to that output
+    return hold(case, reason=IDENTITY_UNRESOLVED | IDENTITY_AMBIGUOUS)   # normal analysis stops (A.8.3)
+```
+
+Diagnostics may still list `RECORD_FIELD` hits on the request email/hash, but they never produce output. [FACT] 0 cases currently take this branch.
+
+#### E.2.2 Episode boundary (evidence-based choice)
+
+Two candidate modes:
+
+- `prior_request`: links observed after the `audit_at` of the subject's latest earlier request belong to this case.
+- `requested_at`: only links observed at or after this request's `requested_at` belong to this case.
+
+**Proposed default: `prior_request`** [PROPOSAL, pending user confirmation as **Q-EPISODE**]. The reasoning comes from the requirements and evidence, not from sample scores:
+
+1. A deletion request covers the subject's personal data that exists at the time of the request. An observation's date is when a system *looked*, not when the data was created. Under `requested_at`, an export observed in June and never re-observed would drop out of an August request. That would be under-reporting, contrary to AGENTS §6.5 ("report every relevant policy violation").
+2. Resources observed before an earlier request's `audit_at` were within that earlier case's audit. Re-auditing them under a later case mixes two episodes.
+
+[FACT] Only 3 subjects have more than one request:
+
+- user_07: case_61 → case_07;
+- user_17: case_46 → case_17;
+- user_18: case_52 → case_33.
+
+So the mode affects only case_07, case_17 and case_33. For subjects with a single request there is no lower boundary under `prior_request`.
+
+[FACT] In the two affected samples, the excluded items are the same under both modes:
+
+- case_07: `object_19`, linked 02-13, before prior audit 02-14;
+- case_17: `account_6523` and `tombstone_17`, linked 03-10, before prior audit 03-11.
+
+The samples therefore cannot distinguish the modes. The choice rests on reasons 1–2.
+
+Required test: a synthetic subject with an export observed between the prior audit and the current `requested_at`. It must be in scope under `prior_request`.
+
+#### E.2.3 Scope
+
+```text
+links = collect C.5 links for subj from observations admissible_for_link(…, late_inner_linking=True)   # A.8 Q-LATE-LINK
+        with link time > episode_start                      # E.2.2
+for R in candidates(links):
+    decision = apply C.5.3 rules I1–I5 / E1–E3              # each with reason code + EvidenceRef list
+    trace.scope[R] = decision                               # included AND excluded are both recorded
+scope = {R | decision.included}
+workflow = C.6 global unique-claim candidates for this case # not links; never in scope (A.8 Q-WEAK-VERIFY = No)
+```
+
+Exclusion uses only the C.5.3 rules. Shared, time-dependent and contradicted links follow I3/I4/I5. The reason is always preserved.
+
+### E.3 Per-resource assessment
+
+```text
+for R in scope:
+    cat      = classify(R)                          # D.1 — Conclusion with basis, confidence, conflicts
+    treat    = TREATMENTS[cat] if cat known else None
+    cond     = evaluate CONDITIONS[cat] at audit_at # D.2.3 — TRUE | FALSE | UNKNOWN
+    dims     = derive dimensions                    # B.4.2: existence(+copies), pii_exposure, flow_state,
+                                                    #        restore_state, retention_condition, evidence_completeness
+                                                    #        from OBSERVED refs only; CLAIM refs attached, never used
+    verdict  = verdict_from(treat, cond, dims)      # B.4.2 table + D.2.4 (FALSE/UNKNOWN -> UNKNOWN(POLICY_GAP|CONDITION_UNKNOWN))
+```
+
+#### E.3.1 Conflicting observations
+
+This addresses the fact that a tie-breaker is not the same as trust.
+
+1. **Different copies are not conflicts.** Each `copy_location` gets its own conclusion (C.8.2). Presence in any copy is PRESENT.
+2. **Different observation times, same copy.** The latest OBSERVED value wins. Earlier values are kept as `SUPERSEDED`. Recency applies only between OBSERVED values: a CLAIM never supersedes an observation.
+3. **Same observation time, same copy, different values.**
+   - First, a provenance check. If both come from the **same trace or record** and one line is a `*_started` / request line while the other is the `*_completed` / result line, the result line is the observation and the other is not a state reading at all. This is a parser concern, so no conflict exists.
+   - Otherwise, evidence quality is compared:
+
+| Quality | Observation type |
+|---|---|
+| Q1 | Direct record read of the resource with field values (SQL row, bundle record, readback/`*_completed` line with fields) |
+| Q2 | Explicit per-resource lookup result (`status_code`, `rows`, `FOUND`/`NOT_FOUND` in handover/ledger/`record_lookup`) |
+| Q3 | Aggregate or derived reading (scan summaries, nested search hits) |
+
+   - A **higher-quality reading wins only if the lower one is a different source type that is known to summarise the higher** (Q2/Q3 vs Q1). The decision is recorded as `RESOLVED_BY_QUALITY`.
+   - In every other case (same quality, or no summarising relation) → `UNKNOWN(CONFLICTING_OBSERVATIONS)`. No tie-breaker decides it.
+   - The tie-break `(observed_at, file_captured_at, file_id)` is used **only to order equal, agreeing observations** for citation (F.2). It is never used to resolve disagreement.
+4. [FACT] 14 resources have multiple differing state readings inside one file (e.g. `account_1417` in evidence_13). The one inspected (`account_1417`: NOT_FOUND then FOUND two days later) differs by observation time, so it falls under rule 2. The other 13 are not yet inspected. Stage 7 counts any true equal-time conflicts.
+
+#### E.3.2 Missing evidence
+
+- A resource with no admissible OBSERVED evidence for a consulted dimension has verdict `UNKNOWN(NO_ADMISSIBLE_OBSERVATION | CLAIMS_ONLY | POST_CUTOFF_ONLY | EVIDENCE_GAP | FIELD_COVERAGE_INCOMPLETE | …)` (B.4.3, D.3.3).
+- The old `UNOBSERVED → skip` behaviour is removed. An UNKNOWN resource stays in every set it belongs to (E.5), and it is never treated as compliant.
+
+### E.4 Final status
+
+#### E.4.1 Sets
+
+```text
+REQ        = { R in scope : R has a required final state }                       # all in-scope resources whose
+             ∪ { PRIMARY_ACCOUNT_SLOT }                                          # category/treatment demands one
+PROVEN_OK  = { R in REQ : verdict == COMPLIANT_PROVEN and verdict.citation }
+VIOLATING  = { R in REQ : verdict == VIOLATION_PROVEN and expressible(R) }       # has a finding operation
+UNEXPRESSIBLE = { R in REQ : verdict == VIOLATION_PROVEN and not expressible(R) }# e.g. RETAINED_RECORD_MISSING
+UNRESOLVED = { R in REQ : verdict == UNKNOWN }
+             ∪ { R in scope : category UNKNOWN }        # treatment unknown => required final state unknown
+             ∪ { PRIMARY_ACCOUNT_SLOT if no USER_PROFILE resource of the subject is in scope }   # C.6 (a)
+WF_VIOLATING = { workflow candidates (C.6) with an OBSERVED violating state }    # C.6 (b)
+```
+
+Rules for these sets:
+
+- `REQ` does **not** shrink when a state is unknown.
+- A resource whose category is unknown is counted in `UNRESOLVED`, so it cannot vanish from the decision.
+- The primary-account slot is satisfied by every in-scope USER_PROFILE resource of the subject. In every sample, exactly one is expected [FACT].
+
+#### E.4.2 Decision
+
+```text
+decide(intent, sets):
+  if intent == NON_DELETION:                        return emit(NOT_APPLICABLE, [])
+  if intent == UNSURE:                              return hold(UNSURE_INTENT)
+  if sets.VIOLATING:
+      if sets.UNRESOLVED:                           return hold(VERIFICATION_SET_INCOMPLETE)   # E.5
+      return emit(INCOMPLETE, findings+remediation+verification)                # E.5, F
+  # no expressible violation
+  if sets.UNEXPRESSIBLE:                            return hold(RETAINED_RECORD_MISSING)       # D.3.9, Q-RETAIN
+  if sets.WF_VIOLATING:                             return hold(REQUIRED_RESOURCE_UNRESOLVED)  # C.6 (b)
+  if sets.UNRESOLVED:                               return hold(REQUIRED_RESOURCE_UNRESOLVED | <reasons>)
+  if REQ == PROVEN_OK:                              return emit(COMPLETE, cited verification)
+  return hold(INTERNAL_INCONSISTENCY)               # unreachable by construction; asserts in tests
+```
+
+**COMPLETE** requires all of the following. An empty findings list is never enough.
+
+- every member of `REQ`, including the primary-account slot, is `COMPLIANT_PROVEN` with an admissible citation;
+- `UNRESOLVED` is empty;
+- `UNEXPRESSIBLE` is empty;
+- `WF_VIOLATING` is empty;
+- no in-scope recreation path is ENABLED or RESTORABLE. These would be `VIOLATING` anyway, because DATA_FLOW and BACKUP_ARCHIVE are in `REQ`.
+
+In the five-resource example (four proven compliant, marketing profile UNKNOWN), the marketing profile is in `UNRESOLVED`, so the case is held. It is not COMPLETE.
+
+**INCOMPLETE** requires all of the following:
+
+- ≥1 expressible proven violation;
+- **every** `REQ` member has a determinable required final state, so the verification phase can list a check for each (E.5).
+
+If a `REQ` member is UNRESOLVED, the status INCOMPLETE would be true, but the output would omit a required check. The case is therefore held with `VERIFICATION_SET_INCOMPLETE` [PROPOSAL; new held reason, see E.8].
+
+**NOT_APPLICABLE** only comes from an explicit NON_DELETION intent (E.1.2).
+
+#### E.4.3 Held cases and the CSV contract
+
+`hold(reason)` records the case in the held list with its reason, its sets, and evidence refs. **The internal held status is never serialized into `output.csv`.**
+
+The serializer receives only `emit(...)` results. The writer applies the A.8.3 rule:
+
+- the root `output.csv` is written only when the held count is 0;
+- otherwise the non-held rows go to `runs/<ts>/staging_output.csv`, the run exits non-zero, and the held list is printed;
+- final generation then waits for the user's authorization (A.8.3 options a/b/c).
+
+[FACT, projected from Sections C/A.8, not a measured run] At least case_01, 02, 04, 07, 08, 10 would be held under the current decisions. So this conflict with the 518-row contract is expected to occur.
+
+### E.5 Verification set
+
+Three sets are kept explicitly separate, and the verification phase is built from `REQ`, not from the set of resources with known state.
+
+| Set | Meaning | Used for |
+|---|---|---|
+| `REQ` | Resources that **require** verification: every in-scope resource with a required final state, plus the primary-account slot | Defines which checks must exist |
+| `PROVEN_OK ∪ VIOLATING ∪ UNEXPRESSIBLE` | Resources whose state was **established** | COMPLETE citations (`PROVEN_OK`); findings (`VIOLATING`) |
+| `UNRESOLVED` | Resources whose evidence is **missing or conflicting**, or whose category/treatment is unknown | Blocks COMPLETE; blocks INCOMPLETE emission (E.4.2) |
+
+Building verification steps:
+
+```text
+verification(case, status):
+  if status == COMPLETE:
+      return [ VERIFY_<final state of TREATMENTS[R]>(R, evidence_id = R.verdict.citation.file_id) for R in REQ ]
+             # REQ == PROVEN_OK here, so every step has an OBSERVED citation
+  if status == INCOMPLETE:
+      return [ VERIFY_<final state of TREATMENTS[R]>(R, evidence_id = "") for R in REQ ]
+             # FUTURE_CHECKs: includes violating, already-compliant, and retained (VERIFY_RECORD_PRESENT) members;
+             # UNRESOLVED is empty here by E.4.2, so no member lacks a determinable final state
+```
+
+Consequences:
+
+- The verification set never shrinks because a state is unknown. A case with an unknown member is held instead of being emitted with fewer checks.
+- Retained records (audit, legal hold) appear as `VERIFY_RECORD_PRESENT` in both statuses.
+- A held case's would-be verification list, plus the list of missing checks, is written to the held report so the user can judge it.
+
+### E.6 Complete per-case procedure
 
 ```text
 analyze(case, ctx):
-  # 1. Authorisation
-  intent = classify_intent(case.request_text)            # E.1
-  if intent != DELETION: return Result(case.id, NOT_APPLICABLE, [])
-
-  # 2. Identity
-  subj = resolve(case.email)                             # C.4
-
-  # 3. Episode boundary (earlier deletion episodes are out of scope) [FACT: case_17, case_07]
-  prior = max(audit_at of other requests (sample+eval inputs) by the same user_id
-              with audit_at < case.requested_at, default=-inf)
-  episode_start = prior if EPISODE_MODE == "prior_request" else case.requested_at
-
-  # 4. Scope
-  links = {}
-  for obs in index.by_identifier(subj.ids):
-      if admissible_for_link(obs, case.audit_at) and observed_time(obs) > episode_start:
-          links[obs.resource_id] += GROUNDED(obs)        # direct / trace
-          for r in obs.related_ids: links[r] += GROUNDED_FK(obs)
-  for a in activities(type=LINK_RESOURCE_IDENTITY, event_time<=audit_at, > episode_start):
-      if a names a subject identifier: links[a.resource_id] += CATALOG(a)
-  for r in ctx.workflow_assignment.get(case.id, []): links.setdefault(r, WORKFLOW)
-  drop r where linked_to_other_subject(r)                # C.5 negative evidence
-  scope = links
-
-  # 5. Per-resource state at audit_at
-  assessments = []
-  for r in scope:
-      cat, basis = classify(r)                           # D.1
-      action = required_action(cat, r)                   # D.2 (+ condition checks)
-      obs_state = [o for o in index.by_resource(r) if admissible_for_state(o, case.audit_at)]
-      state, proof = derive_state(r, cat, obs_state)     # latest per copy_location; omission rule C.8
-      claims = [a for a in activities(resource=r) if a.event_time <= case.audit_at]
-      assessments.append(Assessment(r, cat, action, state, proof, claims, links[r].strength))
-
-  # 6. Violations (findings require an observed fact; claims never create or cancel a finding)
-  findings = []
-  for a in assessments:
-      if a.state == UNOBSERVED: continue                 # no proof either way -> no finding
-      if a.action in {DELETE} and a.state == PRESENT:              findings += (REMAINING_RECORD, a)
-      if a.action in {REDACT, ANONYMIZE, TOMBSTONE_REDACT} and a.state == EXPOSED:
-                                                                    findings += (EXPOSED_PII, a)
-      if a.action == DISABLE_FLOW and a.state == ACTIVE:           findings += (ACTIVE_DATA_FLOW, a)
-      if a.action == BLOCK_RESTORE and a.state == RESTORABLE:      findings += (RESTORE_RISK, a)
-      # WORKFLOW-linked resources may only contribute verification, never findings
-      if a.link_strength == WORKFLOW: drop its finding, log("unsupported identity for finding")
-
-  # 7. Status
-  if findings:
-      status = INCOMPLETE
-      remediation  = [remediation_for(f) for f in findings]                  # proposed actions, evidence ""
-      verification = [final_check(a) for a in assessments if in_verification_set(a)]   # future checks, evidence ""
-  else:
-      status = COMPLETE
-      verification = [final_check(a, cite=a.proof) for a in assessments
-                      if in_verification_set(a) and a.proof is not None]     # observed facts, cited
-  return Result(case.id, status, build_steps(findings, remediation, verification))   # F
+  intent = classify_intent(case.request_text)                       # E.1 (+ cached LLM fallback for UNSURE)
+  subj   = resolve(case.email)                                       # C.4
+  if subj unresolved/ambiguous:            -> E.2.1 branch
+  episode_start = episode_boundary(subj, case, mode=Q-EPISODE)      # E.2.2
+  scope, excluded, workflow = build_scope(subj, case, episode_start) # E.2.3, C.5.3, C.6
+  for R in scope: assess(R)                                          # E.3: classify, condition, dimensions, verdict
+  for W in workflow: assess_state_only(W)                            # only to detect WF_VIOLATING (C.6 b); no steps
+  sets = build_sets(scope, workflow)                                 # E.4.1
+  result = decide(intent, sets)                                      # E.4.2
+  if result is emit(INCOMPLETE):
+      findings    = [finding_op(R)  for R in sets.VIOLATING]        # OBSERVED, cited (F.2)
+      remediation = [remed_op(R)    for R in sets.VIOLATING]        # PROPOSED, evidence ""
+      checks      = verification(case, INCOMPLETE)                   # FUTURE_CHECK, evidence ""
+      validate_dependencies(remediation, edges(scope))               # D.4 — independent of sort
+  if result is emit(COMPLETE):
+      checks      = verification(case, COMPLETE)                     # OBSERVED, cited
+  steps = build_steps(...)                                           # F: A.3.1 sort, numbering, dedupe
+  validate L1–L4 (A.5); on failure -> hold(VALIDATION_FAILED)
+  trace.write(case, intent, subj, scope, excluded, workflow, assessments, sets, result)
+  return result
 ```
 
-`in_verification_set(a)` [FACT-derived, H]:
+### E.7 Tests for Section E
 
-- the primary account (exactly one: the USER_PROFILE resource of the subject's account service; C.6 fallback if only workflow-linked);
-- every SECURITY_AUDIT_LOG / LEGAL_HOLD_RECORD in scope;
-- every resource with a finding;
-- every other in-scope resource with a determinable required final state.
+1. **Gate tests.** Each test checks one rule; they are not tied to sample outputs.
+   - Five-resource fixture with one UNKNOWN → held, not COMPLETE.
+   - All proven compliant → COMPLETE with one citation per `REQ` member.
+   - One violation plus one UNKNOWN → held `VERIFICATION_SET_INCOMPLETE`.
+   - One violation, all others determinable → INCOMPLETE with a check for every `REQ` member.
+   - Category UNKNOWN resource → held.
+   - Primary-account slot empty → held.
+   - Workflow candidate with an observed violation → held. A compliant workflow candidate produces no step.
+2. **Intent tests** as in E.1.3.
+3. **Identity branch.** An unresolved subject with DELETION intent → held. The same subject with NON_DELETION → NOT_APPLICABLE.
+4. **Episode.** The E.2.2 synthetic export test. A prior-request subject's earlier resources are excluded with `EARLIER_EPISODE`.
+5. **Conflicts.**
+   - Equal-time disagreement with the same quality → UNKNOWN.
+   - Q2 summary vs Q1 record → `RESOLVED_BY_QUALITY`.
+   - A CLAIM never supersedes an OBSERVED value.
+6. **Serialization guard.** Any held result reaching the serializer raises. With ≥1 held case, the root `output.csv` is not written and the exit code is non-zero.
 
-Samples confirm: exactly one account ABSENT in every case; audit PRESENT iff an audit record for the subject exists.
+### E.8 Contradictions remaining outside Section E (not edited)
 
-`derive_state` per category:
+The full plan is **not yet consistent**. These passages conflict with Section E and need the alignment pass:
 
-- **Profiles / search / exports / attachments / secondary**: PRESENT if any copy's latest admissible observation shows existence (`rows>=1`, `status_code 200`, `hit`, `FOUND`, row present, `marker_found=false` with a later write); ABSENT if the latest says not found (`rows=0`, `404`, `NOT_FOUND`, `miss`) or omission (C.8).
-- **Messages / tombstones**: EXPOSED vs REDACTED by identifier fields.
-- **Analytics**: EXPOSED vs ANONYMIZED.
-- **Flows**: ACTIVE vs DISABLED.
-- **Backups**: RESTORABLE vs BLOCKED.
-- **Retained records**: PRESENT vs ABSENT.
-
-The latest observation is chosen by `observed_at` (inner, else file), tie-broken by `file_captured_at`, then `file_id`.
-
-### E.1 Intent classification [PROPOSAL; inputs FACT]
-
-[FACT] The 508 deletion-style evaluation texts use 17 opening sentences (12 English, 5 in pt/es/fr/ja/ko) plus 40 boilerplate follow-ups. 10 texts (`case_533`–`case_542`) are non-deletion and each states so explicitly. No public sample is NOT_APPLICABLE.
-
-```text
-classify_intent(text):
-  s = normalize(text)
-  neg = any(p.search(s) for p in NON_DELETION_PATTERNS)   # "not asking for deletion", "don't delete",
-        # "do not close", "leave the account active", "keep the account", "continue using",
-        # "not a request to erase", "without removing", "... only", "copy of", "download",
-        # "what personal information", "correct", "change the email", "stop the promotional"
-  pos = any(p.search(s) for p in DELETION_PATTERNS)        # delete/erase/remove|close account,
-        # exclusão, eliminación/eliminar, suppression, 削除, 삭제 ...
-  if pos and not neg: return DELETION
-  if neg: return NON_DELETION
-  return llm_fallback(text) if LLM_ENABLED else NON_DELETION_UNSURE  # cached; logged; counted
-```
-
-- Patterns are generic language patterns, not case IDs.
-- `CLASSIFY_REQUEST` activities are claims. They are used only as an evaluation cross-check, never as input to the decision.
+| Location | Conflict / gap |
+|---|---|
+| A.4.5 gate pseudocode | Lacks `VERIFICATION_SET_INCOMPLETE`, `WF_VIOLATING` and the primary-account slot. E.4.2 is the more complete form. |
+| A.8.3 reason list | Add `VERIFICATION_SET_INCOMPLETE`, `INTERNAL_INCONSISTENCY`, `VALIDATION_FAILED`, `IDENTITY_AMBIGUOUS`. Add **Q-EPISODE** to A.8.2. |
+| B.1.4 | Its NON_DELETION trigger list ("a limiting 'only' clause … stated non-deletion purpose") is broader than E.1.1/E.1.2. A bare "only" or a purpose word does not decide without scope. B.1.4 should defer to E.1. |
+| B.3 diagram / B.3.3 / B.4.3 | Add the new held reasons. The B.4.3 uncertainty list still lacks the D.6 reasons. |
+| C.6 | "Default: not emitted" now decided (A.8.1). C.6 (a)/(b) are implemented by E.4.1/E.4.2. |
+| C.7 | `late_inner_linking` default now decided (Yes, link-only). |
+| D.6 | Its listed alignments remain pending. |
+| F.2 / F.3 / F.4 | Must take steps only from `emit()` results. F.3's "failure isolation … conservative row" conflicts with A.8.3/E.4.3 and must be replaced by the held path. F.4 must include the serialization guard. |
+| G | Add the E.7 tests. G.4 edge list partly overlaps. |
+| H | No stage yet for intent clause analysis, set construction, or held-report output. |
+| I | R10 (verification-set membership), R11 (account linkage) and R12 (intent) are superseded by E.5, E.4.1 and E.1. |
+| J | Add the held-count gate and the serialization guard. |
 
 ---
 

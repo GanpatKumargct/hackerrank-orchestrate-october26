@@ -888,3 +888,85 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T00:28:58Z] Revise IMPLEMENTATION_PLAN Section E (case decision algorithm)
+
+User Prompt (verbatim, secrets redacted):
+E - Case Decision Algorithm
+
+
+E.1
+Problems and fixes
+1. Negation can override a genuine deletion request. A broad pattern such as "... only" might misclassify “delete only my account, not my orders.”
+   - Fix: evaluate the grammatical scope of negation and test mixed-intent examples.
+2. The fallback behavior is inconsistent with the updated Section B. The original Section E returns NON_DELETION_UNSURE when the LLM is disabled, while the updated B says ambiguous requests should be held.
+   - Fix: use the updated three-way result — DELETION, NON_DELETION, or UNSURE — and route UNSURE to the defined held path.
+3. Positive and negative patterns can both match. The current pseudocode returns DELETION only when a positive pattern matches and no negative pattern matches.
+   - Fix: define precedence and ambiguity handling explicitly; do not let one broad negation automatically settle the case.
+
+E.2
+Problems and fixes
+- Unresolved identity has no explicit branch. The pseudocode calls resolve() but continues into scope analysis without showing what happens if it returns UnresolvedSubject.
+  - Fix: stop normal case analysis and route it to the held/undetermined path defined by the updated A and B.
+- Episode boundaries depend on configuration. The algorithm switches between prior_request and case.requested_at, but the consequences of each mode need to be evaluated and documented.
+  - Fix: choose the mode based on evidence and tests, not simply because one produces better sample scores.
+- The exclusion rule may be too broad. A resource linked to another subject is dropped, even though identity links may conflict or change over time.
+  - Fix: use the updated C.5 rules for link provenance, timing and conflicts; preserve an exclusion reason in the trace.
+
+E.3
+Problems and fixes
+1. Workflow-linked resources are not allowed to create findings. This is conservative, but the algorithm still needs to account for whether these resources are required for a complete audit.
+   - Fix: unresolved or weakly linked required resources must affect completeness; they cannot simply disappear from the final decision.
+2. State derivation needs explicit conflict handling. The plan chooses the latest observation per copy, with timestamps and file ID as tie-breakers. A deterministic tie-breaker alone does not establish which contradictory observation is trustworthy.
+   - Fix: define what happens when equally timed or conflicting observations disagree, using provenance and evidence quality.
+3. A category with no usable evidence becomes UNOBSERVED. The original algorithm skips it when creating findings.
+   - Fix: follow the updated A/B completeness rules. UNOBSERVED must not be treated as proof of compliance.
+
+E.4 — Final status: the most important defect
+The original algorithm has this logic:
+if findings:    status = INCOMPLETEelse:    status = COMPLETE
+
+
+
+This is unsafe because no detected violation does not necessarily mean deletion is complete.
+
+Imagine a case with five required resources:
+Resource	Evidence result
+Account	Proven absent
+Search index	Proven absent
+Analytics	Proven anonymized
+Backup	Proven blocked
+Marketing profile	Unknown — evidence unavailable
+
+The first four resources look compliant. But the fifth resource remains unverified. The original algorithm can still return COMPLETE because no finding was generated for it.
+
+This directly conflicts with the updated Section A completeness gate.
+
+Fix t: The final decision must consider both violations and evidence completeness. A case must not become COMPLETE merely because the findings list is empty. Every required resource and required treatment must be accounted for, and every required verification must have admissible proof.
+
+There is also a contract conflict: the output allows only COMPLETE, INCOMPLETE, and NOT_APPLICABLE, while the updated plan introduces internal UNDETERMINED/held cases. The internal status must not be silently serialized into an invalid output value. The plan needs an explicit rule for what happens when such a case cannot be represented safely in the required CSV.
+
+E.5
+Problem: “With a determinable required final state” can exclude precisely the resources that make the case uncertain.
+
+Fix: Separate the concepts of:
+1. Resources that require verification.
+2. Resources for which a state was successfully established.
+3. Resources for which evidence is missing or conflicting.
+The verification set should not silently shrink just because a resource's state cannot be determined.
+
+Agent Response Summary:
+Verified read-only that only 3 subjects have more than one request (user_07, user_17, user_18; affecting case_07, case_17, case_33) and that samples case_21/25-28 are deletion follow-ups without a deletion verb while case_04/17/19/23/28/31/32 contain object-scoped limits or negations. Rewrote only Section E: clause-scoped three-way intent with explicit precedence table and mixed-intent tests (UNSURE routed to held, NON_DELETION_UNSURE removed); explicit unresolved-identity branch; evidence-reasoned episode default prior_request (Q-EPISODE pending); scope via C.5.3 with recorded exclusion reasons; observed/claim/proposed/future-check tagging; conflict handling by recency, provenance and evidence quality with UNKNOWN when unresolved; explicit REQ/PROVEN_OK/VIOLATING/UNEXPRESSIBLE/UNRESOLVED/WF_VIOLATING sets; decision function where COMPLETE requires every required resource proven and INCOMPLETE requires a full determinable verification set (else held VERIFICATION_SET_INCOMPLETE); held results never serialized, with A.8.3 staging/non-zero-exit behaviour; verification built from REQ; full procedure, tests, and remaining contradictions outside E.
+
+Actions:
+* Edited docs/IMPLEMENTATION_PLAN.md (Section E replaced; other sections byte-identical)
+* Ran read-only Python over dataset request/identity CSVs
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
