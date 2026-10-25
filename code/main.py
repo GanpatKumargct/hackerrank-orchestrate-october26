@@ -1,8 +1,9 @@
 """Command-line entry point.
 
-Stages 0–4 only: `python code/main.py inspect` validates the inputs, parses all
-evidence into an ObservationIndex and prints a coverage summary (counts and file
-IDs only, no personal values). No predictions and no output.csv are produced.
+Stages 0–8: `python code/main.py inspect` validates the inputs, parses all
+evidence, and prints identity, scope, resource-state and case-decision summaries
+(counts and IDs only, no personal values). Case decisions are computed in memory;
+no output.csv, staging file or held report is written (Stage 9).
 """
 import argparse
 import sys
@@ -15,6 +16,7 @@ from audit import config                          # noqa: E402
 from audit.errors import ReportNote, SchemaError, ScopeCode  # noqa: E402
 from audit.scope import ScopeBuilder              # noqa: E402
 from audit.state import assess                    # noqa: E402
+from audit.decision import HOLD, CaseAnalyzer     # noqa: E402
 from audit.evidence.extract import build_index    # noqa: E402
 from audit.identity import IdentityResolver, Subject  # noqa: E402
 from audit.loader import load_dataset             # noqa: E402
@@ -133,11 +135,33 @@ def cmd_inspect(args):
     print(f"violations with no output operation (RETAINED_RECORD_MISSING): {unexpressible}")
     print(f"in-scope resources with ambiguous owner system: {owners_amb}")
     print("evidence gaps admissible-by-capture are not readable:", [g[0] for g in index.gaps()])
+
+    # ---- intent, gate and steps (Stage 8): in memory only; nothing is written ----
+    analyzer = CaseAnalyzer(ds, index, resolver, builder)
+    for source in sorted({r["_source"] for r in ds.all_requests()}):
+        reqs = sorted((r for r in ds.all_requests() if r["_source"] == source),
+                      key=lambda r: config.ROW_SORT_KEY(r["case_id"]))
+        results = [analyzer.analyze(r) for r in reqs]
+        held = [r for r in results if r.outcome == HOLD]
+        print(f"[{source}] cases: {len(results)}")
+        print("  intent:", dict(sorted(Counter(r.intent.value for r in results).items())),
+              " scope-limit notes:", sum(1 for r in results if r.intent.scope_limits))
+        print("  emitted:", dict(sorted(Counter(r.status for r in results if r.outcome != HOLD).items())),
+              " held:", len(held))
+        print("  held by reason:", dict(sorted(Counter(getattr(h, "value", h) for r in held
+                                                         for h in r.held).items())))
+        codes = Counter(d[1] for r in held for d in r.detail if isinstance(d, tuple))
+        print("  unresolved member reasons in held cases:", dict(sorted(codes.items())))
+        steps = Counter(s["phase"] for r in results for s in r.steps)
+        print("  emitted steps by phase:", dict(sorted(steps.items())))
+        odd = [(r.case_id, [getattr(h, "value", h) for h in r.held], list(r.detail)[:2]) for r in held
+               if set(r.held) & {"VALIDATION_FAILED", "ERROR", "SYSTEM_AMBIGUOUS", "INTERNAL_INCONSISTENCY"}]
+        print("  held by validation/system/error:", odd or "none")
     return 0
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Ghost Data Still Exists — deletion audit (Stages 0–4)")
+    parser = argparse.ArgumentParser(description="Ghost Data Still Exists — deletion audit (Stages 0–8, inspect only)")
     parser.add_argument("command", choices=["inspect"])
     parser.add_argument("--dataset", default=str(config.DATASET_DIR))
     args = parser.parse_args(argv)

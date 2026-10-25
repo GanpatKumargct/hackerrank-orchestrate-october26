@@ -406,6 +406,7 @@ Only items that cannot be decided inside the plan remain here.
 |---|---|---|
 | X-SORT-CONFIRM | Organizer confirmation of the numeric `case_id` order | Nothing in implementation; noted at submission |
 | X-MEDIA-TRANSMISSION | (1) Report the vision-capable OpenAI models actually available to the account; (2) obtain explicit approval to transmit the 11 screenshots | Stage 12 (media cache); until then PNG facts are `EVIDENCE_GAP` |
+| Q-ABSENT-NONDELETE-VERIFY | A REDACT / ANONYMIZE / DISABLE resource that is proven **absent** is COMPLIANT in Stage 7, but its chain verification (`VERIFY_RECORD_REDACTED` / `_ANONYMIZED` / `VERIFY_DATA_FLOW_DISABLED`) cannot be cited with an observation that shows ABSENT (F.2.1 check 5), and the samples never show such a resource verified as ABSENT. Stage 8 holds the case (`VALIDATION_FAILED`, detail `CITATION_STATE_MISMATCH`) instead of inventing a verification. [FACT] Current real-data count: 0 cases. | Approval to keep the hold, or to authorize `VERIFY_RECORD_ABSENT` for this situation |
 | X-HELD-MAPPING | After the first complete analysis run, the user reviews the held list and either authorizes reason-specific mappings or extra evidence work, or accepts that no compliant `output.csv` exists | Stage 13 (final output) |
 
 #### A.8.3 Blocking conflict: held cases vs the 518-row contract
@@ -2118,6 +2119,28 @@ analyze(case, ctx):
 
 Aligned with A.8.1 on 2026-10-25 (A.9). E.4.2 is the authoritative gate; A.4.5 summarises it. The decisions now applied here are Q-EPISODE (E.2.2), Q-VERIFICATION-SET-INCOMPLETE and Q-RETAIN (E.4.2), and Q-INTENT-LLM (E.1.2).
 
+### E.9 Stage 8 implementation notes (`code/audit/intent.py`, `code/audit/decision.py`)
+
+Scope per the Stage 8 instruction: intent, sets, gate **and** step construction with a per-case schema check. Everything stays in memory. Writing `output.csv`, the staging file, the held report, and the run-level L1/L3/L4 validator (including D.4 dependency edges) remain Stage 9.
+
+- **Intent (E.1).** Deterministic clause typing; one type per clause; a negation or "only" applies to its own clause. Lexicons cover English and the five observed languages (pt, es, fr, ja, ko). An unsupported language or no typed clause → `UNSURE` → held `UNSURE_INTENT` (the LLM fallback stays off, Q-INTENT-LLM). `DELETION_FOLLOWUP` is recorded when the text references a prior or in-progress deletion together with a verify/check/finish-type action, and only when no `DELETION_NEGATION` clause exists. Scope limits are recorded as case notes and never change policy. [ASSUMPTION] The trigger, object, negation and subset word lists are a lexicon choice; they are tested on synthetic texts, not tuned to sample answers.
+- **Sets (E.4.1).** A resource with a known category is in `REQ`. A resource with an unknown category is in `UNRESOLVED` only. The primary-account slot is satisfied by any in-scope `USER_PROFILE` resource. Unique workflow candidates are assessed state-only; a VIOLATION puts them in `WF_VIOLATING`. Candidates never produce steps.
+- **Gate (E.4.2).** Implemented as written. The identity branch (E.2.1) and `hold(ERROR)` for any exception (F.3.1) are in `CaseAnalyzer.analyze`.
+- **Steps (F.1–F.2).**
+  - Operations come from `TREATMENTS`; phase and state are looked up from `OPERATIONS`.
+  - Output order is `(OPERATIONS index, system_id, resource_id)`, then `step_no` 1..n.
+  - Citations are the single proof source of the Stage 7 verdict, mapped to its manifest `file_id` (an omission proof cites its snapshot file) and re-checked against `audit_at`.
+  - `system_id` comes from owner resolution; an unresolved owner on any `REQ` member → held `SYSTEM_AMBIGUOUS`.
+  - DELETE on a `NEVER_DELETE` category, a non-single proof, a late citation or any schema error → held `VALIDATION_FAILED`.
+  - A non-DELETE resource proven absent cannot be cited for its chain verification → held (Q-ABSENT-NONDELETE-VERIFY, A.8.2).
+- **Per-case schema check.** `validate_steps` covers the status set, the exact seven keys and types, operation/phase/state consistency, consecutive numbering, sort order, uniqueness, evidence rules per status, manifest `file_id` membership and capture ≤ `audit_at`.
+- **Run facts [FACT, Stage 8 inspect run].**
+  - Intent: 508 DELETION, 10 NON_DELETION and 0 UNSURE on evaluation inputs; 32 DELETION on samples, with 7 recording scope limits.
+  - Evaluation inputs: emitted COMPLETE 34, INCOMPLETE 10, NOT_APPLICABLE 10; **held 464** (VERIFICATION_SET_INCOMPLETE 327, REQUIRED_RESOURCE_UNRESOLVED 137); no VALIDATION_FAILED, SYSTEM_AMBIGUOUS or ERROR holds.
+  - Unresolved members behind the holds: `NO_IN_SCOPE_USER_PROFILE` 333 (most subjects' account rows are identifier-free and reachable only through workflow claims shared by several cases, which the approved rules exclude), CONDITION_UNKNOWN 289, POST_CUTOFF_ONLY 185, LABEL_ONLY 11, FIELD_COVERAGE_INCOMPLETE 6, NO_ADMISSIBLE_OBSERVATION 5, CATEGORY_UNGROUNDED 1.
+  - Samples (evaluation-only comparison): 3 emitted, 29 held. case_05 matches exactly. case_03 and case_26 match on status (COMPLETE) but omit one anonymized analytics record each, which carries no identifier and is linked only by workflow claims shared by 3 and 10 cases. False-COMPLETE count is 0.
+  - This confirms the A.8.3 conflict: the held count is far above 0, so Stage 9 will not create the root `output.csv` until X-HELD-MAPPING is decided.
+
 ---
 
 ## F. Output generation (M8, M9)
@@ -2666,8 +2689,8 @@ Each stage is small enough to inspect and test on its own. A stage starts only w
 | 5 | M3 identity + associations (C.4, C.4.1): timelines, `as_of` cutoff, attribution, catalog-claim parsing, record-level conflicts | 1, 4 | 518/518 and 32/32 resolution reported as data metrics; reuse/ambiguity, cutoff, unverified-hash, catalog-status and conflict fixtures pass |
 | 6 | M5 links, scope rules I1–I5/E1–E3, admissibility (C.7), workflow candidates (C.6), episode (`prior_request`) — see C.5.4 | 4, 5 | C.7 ten-row table tests; every included/excluded resource has a reason code; trace-key flag on/off, late-link, cutoff, anomaly, catalog, shared/ownership-changed, episode and workflow fixtures pass |
 | 7 | M4 classification (D.1), conditions (D.2), dimensions and verdicts (B.4, D.3, single-observation proof), omission (C.8), conflicts (E.3.1) — see D.7 | 6 | Unit tests for D.1–D.3, C.8 and E.3.1; Q-D-ASSUMPTIONS edge tests; copy-scope and subject-scoped coverage tests |
-| 8 | Intent (E.1), sets and gate (E.4–E.5) | 7 | G.1.1 gate tests D-1…D-13; E.1.3 intent tests |
-| 9 | Steps, citations, system resolution (F.1–F.2), serializer, validator L1–L4, all-or-nothing writer, held report (F.3–F.4) | 8 | F/G.1 tests; integration I-1…I-5 |
+| 8 | Intent (E.1), sets and gate (E.4–E.5), and — per the Stage 8 instruction — step construction, citations and system resolution (F.1–F.2) with a per-case schema check (F.4 L1.5–L1.8, L2); in memory only — see E.9 | 7 | G.1.1 gate tests D-1…D-13; E.1.3 intent tests; step order/numbering/citation and validator negative fixtures |
+| 9 | Serializer, run-level validator (L1 file checks, L3 citation meaning, L4 policy completeness incl. D.4 dependency edges), all-or-nothing writer, held report (F.3–F.4) | 8 | F/G.1 tests; integration I-1…I-5 |
 | 10 | Evaluator and metrics (G.3), custom cases CC1–CC5 (G.5), edge cases (G.4) | 9 | Metrics computed from an actual run; false-COMPLETE = 0; invalid citations = 0 |
 | 11 | **First complete analysis run** on real data | 10 | Staging file and held report produced; **no root `output.csv`**. Held count, case IDs, reasons and evidence gaps reported to the user (Q1). |
 | 12 | Media extraction (B.1.3) | 11 + X-MEDIA-TRANSMISSION | Only after explicit approval and a confirmed model; cache hash-verified; affected cases re-run |

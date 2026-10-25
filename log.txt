@@ -1539,3 +1539,51 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T02:26:01Z] Stage 8: intent, case decision gate and step construction
+
+User Prompt (verbatim, secrets redacted):
+Stage 7 review is complete. All five decisions are recorded and the full test suite passes (160 tests). Proceed with **Stage 8 only: Intent Classification, Case-Level Decision Logic, and Step Construction**.
+
+### Requirements
+- Classify requests as deletion-authorized or non-deletion intent using the approved intent rules. Non-deletion requests must become `NOT_APPLICABLE` with `steps_json=[]`.
+- For deletion requests, use the approved identity, scope, admissibility, policy, and state results. Do not invent missing evidence or override `UNKNOWN` results.
+- Construct ordered finding, remediation, and verification steps using only the approved operation/state combinations and evidence IDs.
+- Preserve all existing rules for evidence provenance, audit cutoffs, single-observation proof, retained records, tombstones, active data flows, and restore blocking.
+- If required evidence, ownership, category, retention, or treatment is unresolved, apply the approved hold behavior. Do not force a final status.
+- Follow the required step ordering and consecutive `step_no` numbering. Validate the exact output schema internally, without writing the root `output.csv`.
+- Do not introduce LLM/API integration in this stage. Keep the deterministic pipeline as currently designed.
+
+### Tests and validation
+Add focused tests for intent classification, `NOT_APPLICABLE`, `COMPLETE` versus `INCOMPLETE`, held/unknown cases, operation-state validity, evidence citations, step ordering, and numbering. Run the complete test suite and `python code/main.py inspect`. Report actual results, decision counts, hold reasons, and any sample mismatches.
+
+### Boundaries
+- Do not implement Stage 9 or later.
+- Do not write or modify root `output.csv`, and do not generate final predictions.
+- Do not modify dataset/evidence files, add dependencies, make API/network calls, or transmit screenshots.
+- Do not inspect, modify, move, or delete `ganpat-hackrank-hack/`.
+- Do not change `.gitignore` without reporting the need first.
+- Update the implementation plan and append-only `log.txt` as required.
+- Preserve the three external items as open: organizer sort confirmation, screenshot-transmission approval, and held-case mapping after the later full run.
+
+Stop after Stage 8 and wait for review before Stage 9.
+
+Agent Response Summary:
+Implemented code/audit/intent.py (deterministic clause-scoped three-way intent per E.1, five languages plus English, UNSURE held, no LLM) and code/audit/decision.py (E.4.1 sets incl. primary-account slot and workflow-candidate violations, E.4.2 gate, E.2.1 identity branch, hold(ERROR) on exceptions, F.1-F.2 step construction from Stage 7 single-observation proofs, OPERATIONS-derived phase/state, sort and numbering, per-case schema validator). Writer, staging file, held report and run-level L1/L3/L4 + D.4 validation left to Stage 9; the roadmap was re-split accordingly. Added 28 tests (test_intent 8, test_decision 20); development failures were a test expectation (one type per clause) and a fixture Subject constructor, plus adding "fix" to the correction lexicon; final full suite 188 tests OK. Real data (in memory only): evaluation intent 508 DELETION / 10 NON_DELETION / 0 UNSURE; emitted COMPLETE 34, INCOMPLETE 10, NOT_APPLICABLE 10; held 464 (VERIFICATION_SET_INCOMPLETE 327, REQUIRED_RESOURCE_UNRESOLVED 137), mostly NO_IN_SCOPE_USER_PROFILE 333, CONDITION_UNKNOWN 289, POST_CUTOFF_ONLY 185. Samples (evaluation-only scratch comparison): 3 emitted, 29 held; case_05 exact, case_03/case_26 status match with one identifier-free workflow-only analytics record missing each; false-COMPLETE 0. New open item Q-ABSENT-NONDELETE-VERIFY recorded; X-SORT-CONFIRM, X-MEDIA-TRANSMISSION and X-HELD-MAPPING remain open. No output.csv, no dataset change, no API calls, .gitignore untouched.
+
+Actions:
+* Created code/audit/intent.py, code/audit/decision.py, code/tests/test_intent.py, code/tests/test_decision.py
+* Edited code/main.py (Stage 8 in-memory summary in inspect)
+* Edited docs/IMPLEMENTATION_PLAN.md (A.8.2 Q-ABSENT-NONDELETE-VERIFY, E.9 Stage 8 notes, H rows 8-9)
+* Ran python -m unittest discover -s code/tests -t code (188 tests OK) and python code/main.py inspect (exit 0)
+* Ran scratchpad evaluation script comparing samples against dataset/sample_output.csv (evaluation-only; not production code)
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
