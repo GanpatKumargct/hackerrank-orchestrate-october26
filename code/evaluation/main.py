@@ -69,14 +69,19 @@ def _git_dirty_paths():
     return sorted(p for p in paths if "__pycache__" not in p)      # bytecode caches are not code
 
 
-def _code_fingerprint():
-    """SHA-256 over every code/**/*.py (relative path + content): identifies the executed code."""
-    code = config.REPO_ROOT / "code"
+def _code_fingerprint(root=None):
+    """SHA-256 over every code/**/*.py (relative path + content): identifies the executed code.
+
+    Content is hashed with CRLF normalised to LF (in memory only), so the value can be
+    recomputed from the committed blobs regardless of the checkout's line endings.
+    """
+    code = Path(root) if root is not None else config.REPO_ROOT / "code"
     h = hashlib.sha256()
     for p in sorted(code.rglob("*.py")):
         if "__pycache__" in p.parts:
             continue
-        h.update(p.relative_to(code).as_posix().encode("utf-8") + b"\0" + p.read_bytes() + b"\0")
+        content = p.read_bytes().replace(b"\r\n", b"\n")
+        h.update(p.relative_to(code).as_posix().encode("utf-8") + b"\0" + content + b"\0")
     return h.hexdigest()
 
 

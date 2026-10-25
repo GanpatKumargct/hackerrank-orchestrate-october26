@@ -101,6 +101,22 @@ class TestProvenance(unittest.TestCase):
         self.assertIn("identifies the executed code", ev._provenance_note({"git_dirty": False, "dirty_paths": []}))
         self.assertIn("not available", ev._provenance_note({"git_dirty": None, "dirty_paths": []}))
 
+    def test_fingerprint_ignores_line_endings_but_not_content(self):
+        from evaluation import main as ev
+        from tests.fixtures import TempDir
+        with TempDir() as d:
+            src = d / "pkg" / "mod.py"
+            src.parent.mkdir()
+            src.write_bytes(b"x = 1\ny = 2\n")
+            lf = ev._code_fingerprint(d)
+            src.write_bytes(b"x = 1\r\ny = 2\r\n")
+            crlf = ev._code_fingerprint(d)
+            self.assertEqual(src.read_bytes(), b"x = 1\r\ny = 2\r\n")          # file on disk untouched
+            src.write_bytes(b"x = 1\ny = 3\n")
+            changed = ev._code_fingerprint(d)
+        self.assertEqual(lf, crlf)
+        self.assertNotEqual(lf, changed)
+
 
 class TestEvaluatorGuards(unittest.TestCase):
     def test_refuses_repository_root_as_output(self):

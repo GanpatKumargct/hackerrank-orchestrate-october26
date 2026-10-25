@@ -1996,3 +1996,81 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T05:40:08Z] Clean-tree Stage 10 evaluator provenance run
+
+User Prompt (verbatim, secrets redacted):
+The Stage 10.1 changes have been committed, and my working tree is clean.
+
+Please run the documented Stage 10 evaluator command one more time, using a brand-new evaluation output directory.
+
+Verify and report:
+1. `git_dirty` is `false`.
+2. `dirty_paths` is an empty list.
+3. `code_fingerprint` is present.
+4. The recorded commit matches the current committed code.
+5. All tests pass.
+6. Stage 9 files remain unchanged.
+7. Root `output.csv` has not been created.
+
+Do not modify code, change rules, overwrite any existing run, create root `output.csv`, or start Stage 11.
+
+Show me the results and stop.
+
+Agent Response Summary:
+Ran `python code/evaluation/main.py` on the clean tree at HEAD d417876 into the new directory runs/20261025T053849Z_evaluation (exit 0; all acceptance checks PASS; metrics unchanged). Verified git_dirty=false, dirty_paths=[], code_fingerprint present, recorded commit == HEAD, 215 tests OK, Stage 9 SHA-256 unchanged, no root output.csv, earlier runs untouched. Found that the fingerprint cannot be recomputed from the HEAD blobs: five working-copy files (pdf_parser.py, policy.py, scope.py, state.py, test_policy.py) use CRLF while the committed blobs use LF (core.autocrlf=input), so raw-byte hashing differs although content is identical; an LF-normalised fingerprint equals the HEAD-blob fingerprint. Reported as a gap with a proposed follow-up; no code changed.
+
+Actions:
+* Ran git status / rev-parse; python code/evaluation/main.py (new dir runs/20261025T053849Z_evaluation)
+* Recomputed fingerprint from HEAD blobs and diagnosed CRLF differences (read-only)
+* Ran python -m unittest discover -s code/tests -t code (215 tests OK)
+* Verified runs/20261025T024207Z/* SHA-256 unchanged; removed __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
+## [2026-10-25T05:43:12Z] Code-fingerprint line-ending normalisation (not committed)
+
+User Prompt (verbatim, secrets redacted):
+I approve the narrowly scoped code-fingerprint normalization fix.
+
+### Change
+Update `_code_fingerprint()` so that Python source files are hashed after normalizing CRLF line endings to LF. Ensure normalization is deterministic and does not modify the files on disk.
+
+### Tests
+- Add a test proving the same source content produces the same fingerprint with LF and CRLF line endings.
+- Keep the existing fingerprint and dirty-state tests passing.
+- Run the full test suite.
+
+### Restrictions
+- Change only the fingerprint implementation, its focused tests, and any explicitly required implementation-plan notes.
+- Do not modify evidence, dataset, approved rules, Stage 9 artifacts, previous evaluation runs, or `.gitignore`.
+- Do not generate root `output.csv`.
+- Do not start Stage 11.
+- Do not commit changes without showing me the diff and asking for approval.
+
+### After implementation
+Report the changed files, test results, and exact verification steps needed after the fix. Stop and wait for review before committing.
+
+Agent Response Summary:
+`_code_fingerprint(root=None)` now hashes each code/**/*.py with CRLF replaced by LF in memory (files untouched); the optional root parameter exists only to make the behaviour testable, and the default is unchanged. Added test_fingerprint_ignores_line_endings_but_not_content (LF vs CRLF equal, file on disk untouched, content change detected); existing provenance tests still pass; full suite 216 tests OK. Updated the plan G.7 provenance note with the normalisation and the fact that run 20261025T053849Z_evaluation predates it. Stage 9 artifacts and earlier evaluation runs unchanged; no output.csv; nothing committed; Stage 11 not started.
+
+Actions:
+* Edited code/evaluation/main.py (_code_fingerprint normalisation), code/tests/test_evaluation.py (1 test), docs/IMPLEMENTATION_PLAN.md (G.7 note)
+* Ran python -m unittest discover -s code/tests -t code (216 tests OK)
+* Verified runs/20261025T024207Z/* SHA-256 unchanged; removed __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
