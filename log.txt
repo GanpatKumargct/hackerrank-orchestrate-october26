@@ -1385,3 +1385,33 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T01:34:57Z] Stage 6: links, scope rules, admissibility, workflow candidates, episodes
+
+User Prompt (verbatim, secrets redacted):
+Stage 5 reviewed and approved. Proceed with Stage 6 only: resource links, scope rules, evidence admissibility, workflow candidates, and episode boundaries.
+
+Preserve the existing identity-resolution and owner-resolution rules. Keep identity claims separate from verified identity links; do not use trace/query keys, timing, prefixes, manifest origin, or reporter service as identity proof. Apply audit-time cutoffs and the approved `prior_request` episode boundary. Treat workflow relationships as candidates, not identity proof. Preserve unresolved and ambiguous cases rather than guessing.
+
+Add focused tests for scope inclusion/exclusion, admissibility and cutoff handling, link conflicts, workflow candidates, and episode boundaries. Run the full test suite and `python code/main.py inspect`; report actual results and unresolved gaps.
+
+Do not implement later stages, infer deletion outcomes, create or modify root `output.csv`, modify dataset/evidence files, add dependencies, make API calls, transmit screenshots, or inspect/modify `ganpat-hackrank-hack/`. Update the plan and append-only log, then stop for review.
+
+Agent Response Summary:
+Implemented code/audit/admissibility.py (C.7 functions with explicit branches, claim admissibility, admissibility sets) and code/audit/scope.py (subject links requiring link-admissibility and ATTRIBUTED identity; RECORD_FIELD/FREE_TEXT/DERIVED_FROM/CATALOG_CLAIM links; conditional TRACE_KEY links per approved C.5.2 behind config.TRACE_KEY_LINKS; query keys never link; other-subject links; C.5.3 include/exclude rules with reason codes; prior_request episode boundary; global workflow candidates that never enter scope). Flagged the tension between the instruction wording on trace keys and plan C.5.2 as open item Q-TRACE-KEY-LINK with measured impact (281 included resources rely only on trace links). Added 19 tests; first run had 1 failure caused by a test fixture whose sample request shared the workflow window (behaviour was correct), fixed fixture; final full suite 130 tests OK. Real data: included GROUNDED_DIRECT 1187, GROUNDED_TRACE 282, CATALOG 10, CONTAINS_SUBJECT_PII 2, GROUNDED_FK 1; excluded EARLIER_EPISODE 4, WEAK_LINK_ONLY 1, AMBIGUOUS_WORKFLOW 2715; 195 included resources have only late link-only evidence; 12 cases with no in-scope resource. Plan C.5.4, A.8.2 and H updated. No state inference, no output.csv, no dataset change, no API calls.
+
+Actions:
+* Created code/audit/admissibility.py, code/audit/scope.py, code/tests/test_admissibility.py, code/tests/test_scope.py
+* Edited code/audit/config.py (workflow event types, TRACE_KEY_LINKS flag) and code/main.py (scope summary)
+* Edited docs/IMPLEMENTATION_PLAN.md (C.5.4, A.8.2 Q-TRACE-KEY-LINK, H Stage 6)
+* Ran python -m unittest discover -s code/tests -t code (final 130 tests OK) and python code/main.py inspect
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+

@@ -12,7 +12,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audit import config                          # noqa: E402
-from audit.errors import SchemaError              # noqa: E402
+from audit.errors import ReportNote, SchemaError, ScopeCode  # noqa: E402
+from audit.scope import ScopeBuilder              # noqa: E402
 from audit.evidence.extract import build_index    # noqa: E402
 from audit.identity import IdentityResolver, Subject  # noqa: E402
 from audit.loader import load_dataset             # noqa: E402
@@ -69,6 +70,35 @@ def cmd_inspect(args):
     print("identifier-hit attribution:", dict(sorted(attributions.items())))
     conflicts = resolver.record_conflicts(index.all())
     print("record-level identity conflicts:", [(c.obs_id, c.users) for c in conflicts] or "none")
+
+    # ---- scope (Stage 6): counts and IDs only; no state, no outcomes ----
+    builder = ScopeBuilder(ds, index, resolver)
+    inc, exc, rel_only = Counter(), Counter(), Counter()
+    late_only, no_scope, episode = 0, [], []
+    for req in sorted(ds.all_requests(), key=lambda r: (r["_source"], config.ROW_SORT_KEY(r["case_id"]))):
+        sc = builder.build(req)
+        for d in sc.included.values():
+            inc[d.code.value] += 1
+            rels = {l.relationship for l in d.subject_links}
+            if len(rels) == 1:
+                rel_only[next(iter(rels))] += 1
+            if all(ReportNote.LINK_EVIDENCE_POST_CUTOFF in l.notes for l in d.subject_links):
+                late_only += 1
+        for d in sc.excluded.values():
+            exc[d.code.value] += 1
+        if not sc.included:
+            no_scope.append(req["case_id"])
+        if sc.episode_start is not None:
+            episode.append((req["case_id"], sorted(r for r, d in sc.excluded.items()
+                                                   if d.code == ScopeCode.EARLIER_EPISODE)))
+    print("scope included by code:", dict(sorted(inc.items())))
+    print("scope excluded by code:", dict(sorted(exc.items())))
+    print("included resources supported by a single relationship type:", dict(sorted(rel_only.items())))
+    print(f"included resources whose links are all late-captured (link-only, no state proof): {late_only}")
+    print(f"cases with no in-scope resource: {len(no_scope)} {no_scope}")
+    print("episode-bounded cases (prior_request) and excluded resources:", episode)
+    claim_sizes = Counter("unique" if len(v) == 1 else "shared" for v in builder._claimants.values())
+    print("workflow-claimed resources (candidates only):", dict(claim_sizes))
     return 0
 
 

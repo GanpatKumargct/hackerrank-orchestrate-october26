@@ -88,6 +88,16 @@ EPISODE_MODE = "prior_request"            # Q-EPISODE
 LATE_INNER_LINKING = True                 # Q-LATE-LINK: link-only, never state/citation
 WORKFLOW_LINK_MODE = "unique_only"        # C.6: candidates only, never steps (Q-WEAK-VERIFY = No)
 WORKFLOW_WINDOW_HOURS = 3                 # C.6 heuristic
+WORKFLOW_EVENT_TYPES = frozenset({        # C.6 candidate generation (claims only)
+    "DELETE_RECORD", "REDACT_RECORD", "ANONYMIZE_RECORD", "DISABLE_DATA_FLOW", "BLOCK_RESTORE",
+    "CHECK_DATA_FLOW", "CHECK_RESTORE_ACCESS",
+})
+WORKFLOW_SOURCE_SYSTEM = "deletion_worker"
+# C.5.2 TRACE_KEY relationship (plan-authorized, conditional). A trace key alone is
+# never identity proof: it links only when the trace's request key attributes to
+# the subject AND the state line names the resource AND that line's own identifier
+# fields do not attribute to someone else. Switchable for review (Stage 6 report).
+TRACE_KEY_LINKS = True
 AUDIT_LLM_ENABLED = os.environ.get("AUDIT_LLM_ENABLED", "0") == "1"   # Q-INTENT-LLM, default off
 MEDIA_TRANSMISSION_AUTHORIZED = False     # Q-MEDIA-PROVIDER: not authorized; not overridable by env
 

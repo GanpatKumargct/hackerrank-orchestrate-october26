@@ -400,6 +400,7 @@ Only items that cannot be decided inside the plan remain here.
 |---|---|---|
 | X-SORT-CONFIRM | Organizer confirmation of the numeric `case_id` order | Nothing in implementation; noted at submission |
 | X-MEDIA-TRANSMISSION | (1) Report the vision-capable OpenAI models actually available to the account; (2) obtain explicit approval to transmit the 11 screenshots | Stage 12 (media cache); until then PNG facts are `EVIDENCE_GAP` |
+| Q-TRACE-KEY-LINK | Confirmation requested. The Stage 6 instruction says trace/query keys are not identity proof, while the approved C.5.2 allows a conditional STRONG `TRACE_KEY` link: the trace request key attributes to the subject, the state line names the resource, and no conflicting own identifier is present. Stage 6 implements C.5.2 behind `config.TRACE_KEY_LINKS` (currently on). 281 included resources depend only on it. | Stage 7 interpretation of those 281 resources; switching the flag off is a one-line change and is covered by a test |
 | X-HELD-MAPPING | After the first complete analysis run, the user reviews the held list and either authorizes reason-specific mappings or extra evidence work, or accepts that no compliant `output.csv` exists | Stage 13 (final output) |
 
 #### A.8.3 Blocking conflict: held cases vs the 518-row contract
@@ -1115,6 +1116,38 @@ For each candidate resource R and case subject S, consider:
 Exclusion is never applied from a single conflicting hit without these rules.
 
 [FACT] Across all single-resource observations in the current evidence, no resource co-occurs with identifiers of more than one known subject, so I3/I4 do not arise today. They are specified so that a future occurrence is handled deterministically and visibly.
+
+#### C.5.4 Stage 6 implementation notes (`code/audit/scope.py`, `code/audit/admissibility.py`)
+
+- **Admissibility.** The C.7 functions are implemented exactly as written, with explicit branches. `admissibility_set` gives the B.4.1 `EvidenceRef.admissible` set. Activities are admissible as claims only if `event_time ≤ audit_at`.
+- **Subject links.** A link needs **both** of these:
+  - the observation is `admissible_for_link` at the case's `audit_at`;
+  - the hit's identity attribution (C.4.1) is `ATTRIBUTED` to the subject at the observation's time. Ambiguous or unknown identifiers never link.
+
+  Link types:
+
+  | Relationship | Confidence | Condition |
+  |---|---|---|
+  | `RECORD_FIELD` | STRONG | Subject identifier in an identifying field of the record |
+  | `FREE_TEXT_MENTION` | MEDIUM | Subject identifier in free text of the record |
+  | `TRACE_KEY` | STRONG | Only when `config.TRACE_KEY_LINKS` is on **and** the record's own identifier fields do not attribute to another user (C.5.2) |
+  | `DERIVED_FROM` | MEDIUM | For the FK target of a STRONG-linked record |
+  | `CATALOG_CLAIM` | MEDIUM | `CONSISTENT` claims only, at or before `audit_at` |
+
+  Query keys never link.
+- **Other-subject links** for C.5.3 are read from the candidate resource's own admissible observations and from consistent catalog claims naming another user.
+- **Decision rules** I1–I5 and E1–E2 are applied as in C.5.3:
+  - "overlapping" = a shared source observation or an identical observation time;
+  - every decision keeps its links and reason code, for included and excluded resources alike.
+- **Episode.** `prior_request`: `episode_start` is the latest `audit_at` of another request (sample or evaluation input) by the same resolved user that is earlier than this `requested_at`. Links at or before it are `EARLIER_EPISODE`.
+- **Workflow candidates.** C.6 runs globally over all 550 inputs. Resources grounded to anyone are dropped first. A unique claimant gives `WEAK_LINK_ONLY` (`workflow_candidates`); several claimants give `AMBIGUOUS_WORKFLOW`. Neither ever enters scope.
+- **Never identity:** `reporter_service`, manifest `origin`, prefixes, timing, query keys.
+- [FACT, Stage 6 run on 550 inputs]
+  - Included resources: `GROUNDED_DIRECT` 1,187; `GROUNDED_TRACE` 282; `CATALOG` 10; `CONTAINS_SUBJECT_PII` 2; `GROUNDED_FK` 1.
+  - Excluded: `EARLIER_EPISODE` 4 (case_33 `export_1260`; case_07 `object_19`; case_17 `account_6523`, `tombstone_17`); `WEAK_LINK_ONLY` 1; `AMBIGUOUS_WORKFLOW` 2,715 resource-case pairs. 436 of the 437 workflow-claimed resources have more than one claimant.
+  - **281 included resources rest only on `TRACE_KEY` links**, see Q-TRACE-KEY-LINK in A.8.2.
+  - **195 included resources have only late-captured (link-only) links**, so their state cannot be proven at the cutoff. Sample examples: case_09 `account_3960` and `audit_record_4902`; case_23/24/29/30 audit records; case_26 `account_5684`.
+  - 12 cases have no in-scope resource: case_01, 02, 04 and the non-deletion inputs case_534–542. Intent is not applied until Stage 8.
 
 ### C.6 Identifier-free resources and workflow candidates
 
@@ -2573,7 +2606,7 @@ Each stage is small enough to inspect and test on its own. A stage starts only w
 | 3 | Log + TXT parsers (4 line formats + pipe), trace grouping, trace keys, identifier extraction (C.3) | 2 | All 26 logs and the TXT parse. Any non-OK status is explained. Started-line keys are attached as `TRACE_KEY`. Free-text identifiers are found. Normalisation keeps raw values. |
 | 4 | Stdlib PDF extractor (B.1.2) with page-level provenance; local media-cache reader with SHA/prompt/schema verification (B.1.3, no external calls); `ObservationIndex`; owner resolution (F.1.3, Q-OWNER-RESOLUTION) | 3 | 4 PDFs OK. 11 PNGs reported as `EVIDENCE_GAP` until an authorized cache exists. Index lookups deterministic, with no merging of observations. Owner-resolution tests pass. |
 | 5 | M3 identity + associations (C.4, C.4.1): timelines, `as_of` cutoff, attribution, catalog-claim parsing, record-level conflicts | 1, 4 | 518/518 and 32/32 resolution reported as data metrics; reuse/ambiguity, cutoff, unverified-hash, catalog-status and conflict fixtures pass |
-| 6 | M5 links, scope rules I1–I5/E1–E3, admissibility (C.7), workflow candidates (C.6), episode (`prior_request`) | 4, 5 | C.7 ten-row table tests; every included/excluded resource has a reason code |
+| 6 | M5 links, scope rules I1–I5/E1–E3, admissibility (C.7), workflow candidates (C.6), episode (`prior_request`) — see C.5.4 | 4, 5 | C.7 ten-row table tests; every included/excluded resource has a reason code; trace-key flag on/off, late-link, cutoff, anomaly, catalog, shared/ownership-changed, episode and workflow fixtures pass |
 | 7 | M4 classification (D.1), conditions (D.2), dimensions and verdicts (B.4, D.3, single-observation proof), omission (C.8), conflicts (E.3.1) | 6 | Unit tests for D.1–D.3, C.8 and E.3.1; Q-D-ASSUMPTIONS edge tests |
 | 8 | Intent (E.1), sets and gate (E.4–E.5) | 7 | G.1.1 gate tests D-1…D-13; E.1.3 intent tests |
 | 9 | Steps, citations, system resolution (F.1–F.2), serializer, validator L1–L4, all-or-nothing writer, held report (F.3–F.4) | 8 | F/G.1 tests; integration I-1…I-5 |
