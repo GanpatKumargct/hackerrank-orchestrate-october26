@@ -124,10 +124,30 @@ EVIDENCE_CAPTURE_MARGIN_DAYS = 30   # warning only (B.5 M1)
 # System ownership (F.1.3). Explicit owner fields beat reporter aliases.
 # --------------------------------------------------------------------------- #
 OWNER_FIELDS = ("system", "data_store", "origin_system")
+# Q-OWNER-RESOLUTION: values seen as explicit owner fields in participant evidence
+# (Stage 4 survey). Activity target_system values are claims and are not added.
+CANONICAL_SYSTEMS = frozenset({
+    "account_service", "analytics_platform", "backup_service", "export_service",
+    "identity_service", "integration_service", "legal_service", "search_service",
+    "security_service", "support_platform",
+})
 SYSTEM_ALIASES = {                         # Q-SYSTEM-ALIASES (A.8.1) [ASSUMPTION]
     "profile_service": "account_service",
     "support_replica": "support_platform",
 }
+
+# --------------------------------------------------------------------------- #
+# Media (B.1.3). Local, hash-pinned cache only; nothing is ever transmitted.
+# --------------------------------------------------------------------------- #
+MEDIA_CACHE_DIR = REPO_ROOT / "code" / "media_cache"
+MEDIA_PROMPT_PATH = REPO_ROOT / "code" / "prompts" / "media_extraction.md"
+MEDIA_SCHEMA_VERSIONS = frozenset({"1"})
+
+# PDF in-document time labels (C.1). Observation labels describe when the document
+# itself was captured/issued; event labels describe facts inside it and are kept as
+# fields only, never as observation time.
+PDF_OBSERVATION_LABELS = ("captured", "issued", "generated")
+PDF_EVENT_LABELS = ("recorded", "received", "submitted", "retain until", "created", "modified")
 
 # Inventory SQL tables -> (owning system, collection) (C.1, C.8.1 SYSTEM level)
 INVENTORY_TABLES = {

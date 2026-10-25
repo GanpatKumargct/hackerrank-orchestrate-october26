@@ -1,17 +1,19 @@
-"""Evidence extraction dispatcher (M2, Stages 2–3).
+"""Evidence extraction dispatcher (M2, Stages 2–4).
 
-PDF (Stage 4) and PNG (media cache, Stage 4/12) are not parsed yet. They are
-reported as FAILED coverage gaps, never as empty files (B.3.2).
+PNG evidence is read only from the local, hash-verified media cache; without a
+valid entry it is a FAILED coverage gap, never an empty file (B.3.2).
 """
-from .. import config
 from ..models import FileExtraction
+from .index import ObservationIndex
 from .json_parser import parse_json
 from .log_parser import parse_log
+from .media_cache import parse_png
+from .pdf_parser import parse_pdf
 from .sql_parser import parse_sql
 from .text_parser import parse_text
 
 
-def extract_file(manifest_row):
+def extract_file(manifest_row, media_cache_dir=None, media_prompt_path=None):
     suffix = manifest_row["_path"].suffix.lower()
     if suffix == ".sql":
         return parse_sql(manifest_row)
@@ -21,24 +23,25 @@ def extract_file(manifest_row):
         return parse_log(manifest_row)
     if suffix == ".txt":
         return parse_text(manifest_row)
+    if suffix == ".pdf":
+        return parse_pdf(manifest_row)
+    if suffix == ".png":
+        return parse_png(manifest_row, media_cache_dir, media_prompt_path)
     rep = FileExtraction(file_id=manifest_row["file_id"], path=manifest_row["file_path"],
                          fmt=suffix.lstrip("."), status="FAILED")
-    if suffix == ".pdf":
-        rep.reasons.append("PDF extractor not implemented until Stage 4 (EVIDENCE_GAP)")
-    elif suffix == ".png":
-        reason = "no verified media-cache entry (EVIDENCE_GAP)"
-        if not config.MEDIA_TRANSMISSION_AUTHORIZED:
-            reason += "; screenshot transmission not authorized (A.8.1 Q-MEDIA-PROVIDER)"
-        rep.reasons.append(reason)
-    else:
-        rep.reasons.append(f"unsupported evidence format {suffix!r}")
+    rep.reasons.append(f"unsupported evidence format {suffix!r} (EVIDENCE_GAP)")
     return [], rep
 
 
-def extract_all(dataset):
+def extract_all(dataset, media_cache_dir=None, media_prompt_path=None):
     observations, reports = [], {}
     for row in sorted(dataset.manifest, key=lambda r: r["file_id"]):
-        obs, rep = extract_file(row)
+        obs, rep = extract_file(row, media_cache_dir, media_prompt_path)
         observations.extend(obs)
         reports[row["file_id"]] = rep
     return observations, reports
+
+
+def build_index(dataset, media_cache_dir=None, media_prompt_path=None):
+    observations, reports = extract_all(dataset, media_cache_dir, media_prompt_path)
+    return ObservationIndex(observations, reports)

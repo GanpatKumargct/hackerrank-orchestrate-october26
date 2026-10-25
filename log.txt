@@ -1272,3 +1272,86 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T01:18:55Z] Stage 4: PDF extractor, media-cache reader, ObservationIndex, owner rule
+
+User Prompt (verbatim, secrets redacted):
+Proceed with Stage 4 only: PDF extraction, local media-cache reading, and ObservationIndex.
+
+Decision - canonical reporter-service owner
+
+Update the decision register and relevant implementation-plan sections to approve this rule:
+
+Resolve an explicit, valid owner field first.
+
+Apply existing evidence-backed system aliases next.
+
+If reporter_service exactly matches a recognized canonical system ID, it may resolve the owner.
+
+Do not infer ownership from prefixes, partial matches, similar names, or timing alone.
+
+If the match is absent, conflicting, or otherwise ambiguous, retain SYSTEM_AMBIGUOUS.
+
+Keep this rule narrowly scoped to owner resolution. Add tests for exact canonical matches, unknown services, prefix-only matches, explicit-owner precedence, and conflicting evidence. Do not use reporter service as an identity link.
+
+Stage 4 scope
+
+PDF extractor
+
+Implement local extraction using the standard library where feasible, as previously investigated.
+
+Preserve page-level provenance and distinguish file capture time from internal event/observation time.
+
+Handle malformed, encrypted, unsupported, and image-only PDFs explicitly.
+
+Never fabricate missing text or treat extraction failure as proof that a record is absent.
+
+Media-cache reader
+
+Read only media/cache content already available locally and authorized by the repository's existing rules.
+
+Do not call external APIs, upload screenshots, or transmit evidence to any model/provider.
+
+Keep PNG evidence gaps explicit where reliable extraction is not available.
+
+Do not change the pending external media-transmission decision.
+
+ObservationIndex
+
+Implement deterministic indexing and lookup over normalized observations and their supported keys.
+
+Preserve links to original evidence, source locations, timestamps, and provenance.
+
+Do not turn trace/query-key matches into identity links unless the existing plan explicitly authorizes that relationship.
+
+Do not collapse observations from different times or sources into a stronger claim than the evidence supports.
+
+Tests and validation
+
+Add focused synthetic tests for PDF extraction, extraction failures, media-cache behavior, index lookups, duplicate keys, and provenance preservation.
+
+Run the complete existing test suite and the new tests.
+
+Run python code/main.py inspect and report actual results.
+
+Report PDF/media coverage and all remaining extraction gaps.
+
+Agent Response Summary:
+Recorded Q-OWNER-RESOLUTION in A.8.1 and rewrote F.1.3 (explicit valid owner -> alias -> exact canonical reporter; never prefix/partial/timing; else SYSTEM_AMBIGUOUS; canonical list = 10 explicit owner values surveyed in evidence), updated H Stage 4 and I.R14. Implemented stdlib PDF extractor (object table, page tree, per-font ToUnicode CMaps or WinAnsi, ASCII85/Flate, explicit FAILED for malformed/encrypted/unsupported-filter/image-only; page-level observations; document capture time vs in-document event times kept separate), local hash/prompt/schema-verified media-cache reader with no network use, ownership.py, and a deterministic non-merging ObservationIndex with identifier lookups separate from trace/query keys. Ran the full suite: 99 tests OK on the first run (34 new). inspect: 4/4 PDFs OK (2 observations; 2 context-only), 11 PNGs FAILED as EVIDENCE_GAP, 2953 observations, owner resolution EXPLICIT 1319 / ALIAS 303 / REPORTER_EXACT 417 / AMBIGUOUS 2 (the two PDF-only resources). No API calls, no cache created, no output.csv, dataset untouched.
+
+Actions:
+* Edited docs/IMPLEMENTATION_PLAN.md (A.8.1 Q-OWNER-RESOLUTION, F.1.3, H Stage 4, I.R14)
+* Edited code/audit/config.py, code/audit/models.py, code/audit/evidence/extract.py, code/main.py, code/tests/test_real_evidence.py
+* Created code/audit/evidence/pdf_parser.py, media_cache.py, index.py; code/audit/ownership.py
+* Created code/tests/pdf_fixtures.py, test_pdf_parser.py, test_media_cache.py, test_ownership.py, test_index.py
+* Ran python -m unittest discover -s code/tests -t code (99 tests OK) and python code/main.py inspect
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+

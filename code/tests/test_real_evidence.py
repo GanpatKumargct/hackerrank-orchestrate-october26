@@ -27,10 +27,22 @@ class TestRealEvidence(unittest.TestCase):
         self.assertEqual(status[("log", "OK")], 26)
         self.assertEqual(status[("text", "OK")], 1)
 
-    def test_media_reported_as_gaps_not_empty(self):
-        gaps = [r for r in self.reports.values() if r.fmt in ("pdf", "png")]
-        self.assertEqual(len(gaps), 15)
-        self.assertTrue(all(r.status == "FAILED" and r.reasons for r in gaps))
+    def test_png_reported_as_gaps_not_empty(self):
+        pngs = [r for r in self.reports.values() if r.fmt == "png"]
+        self.assertEqual(len(pngs), 11)
+        self.assertTrue(all(r.status == "FAILED" and "EVIDENCE_GAP" in r.reasons[0] for r in pngs))
+
+    def test_pdfs_extract_with_page_provenance(self):
+        pdfs = {r.file_id: r for r in self.reports.values() if r.fmt == "pdf"}
+        self.assertEqual(sorted(pdfs), ["evidence_18", "evidence_27", "evidence_55", "evidence_58"])
+        self.assertTrue(all(r.status == "OK" and r.pages for r in pdfs.values()))
+        self.assertEqual({fid: len(r.pages) for fid, r in pdfs.items()},
+                         {"evidence_18": 2, "evidence_27": 2, "evidence_55": 1, "evidence_58": 2})
+        pdf_obs = {o.file_id: o for o in self.obs if o.source_format == "pdf"}
+        self.assertEqual(sorted(pdf_obs), ["evidence_55", "evidence_58"])
+        self.assertEqual(pdf_obs["evidence_55"].observed_raw, "2026-09-05T06:30:00Z")   # 'issued'
+        self.assertEqual(pdf_obs["evidence_58"].observed_raw, "2026-09-12T07:30:00Z")   # 'captured'
+        self.assertIn("event_time.recorded", pdf_obs["evidence_55"].fields)
 
     def test_sql_headers_match_manifest(self):
         for r in self.reports.values():

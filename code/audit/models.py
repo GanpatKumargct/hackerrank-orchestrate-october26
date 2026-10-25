@@ -71,6 +71,7 @@ class FileExtraction:
     reasons: list = field(default_factory=list)
     warnings: list = field(default_factory=list)
     coverage: list = field(default_factory=list)
+    pages: list = field(default_factory=list)      # [(page_no, text)] for documents (PDF)
 
     def finalize(self):
         if self.status != "FAILED" and self.unparsed_units:

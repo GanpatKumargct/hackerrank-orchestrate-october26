@@ -379,6 +379,7 @@ This register is the single authoritative place for decisions. Other sections re
 | Q-DEP | The output sort contract takes precedence over downstream→source ordering. The order is unchanged; `DEPENDENCY_ORDER_CONFLICT` is reported and tested. Non-conflicting dependencies (D1) are still enforced. | user (Q10) | A.3.3, D.4.2, F.1.4 |
 | Q-D-ASSUMPTIONS | **Provisionally approved, still labelled [ASSUMPTION], each tested:** (a) legacy contact index → SECONDARY_IDENTIFIER / DELETE; (b) rule_05 shared-context indicators; (c) rule_14 restore-block condition TRUE unless admissible evidence shows blocking is impossible; (d) handover "no direct identifier" counts as CLEARED slots **only when that evidence actually states it for that record**, and a missing field is never proof; (e) connector → target-system map; (f) `VERIFY_RECORD_PRESENT` for a required legal-hold record when its condition and presence are proven | user (Q11) | Never presented as challenge requirements or verified facts |
 | Q-SYSTEM-ALIASES | `profile_service → account_service` and `support_replica → support_platform` | user (Q12) | Centralised in `config.SYSTEM_ALIASES`; applied only below explicit owner fields (F.1.3); tested |
+| Q-OWNER-RESOLUTION | Owner (`system_id`) resolution order: (1) explicit, valid owner field; (2) evidence-backed alias; (3) `reporter_service` that **exactly** equals a recognized canonical system ID. Never from prefixes, partial matches, similar names or timing. Absent, conflicting or ambiguous → `SYSTEM_AMBIGUOUS`. | user (Stage 4 instruction) | Scoped to owner resolution only; `reporter_service` is never an identity link. Canonical IDs = `config.CANONICAL_SYSTEMS` (F.1.3). Tested. |
 | Q-MEDIA-PROVIDER | OpenAI preferred. **Screenshot transmission is not authorized.** No vision API call is made. Missing or unverified PNG extraction is an explicit coverage gap (`EVIDENCE_GAP`). | user (Q13) | Before the final run, report the available vision-capable model options and request explicit approval (X-MEDIA-TRANSMISSION) |
 | Q-INTENT-LLM | `AUDIT_LLM_ENABLED=0` by default. A deterministic `UNSURE` keeps the case held, with the reason reported. No LLM call unless separately authorized. | user (Q14) | — |
 | Q-README | The original challenge text is preserved. A clearly delimited "Solution — Setup and Run" section is appended at the **bottom** of the root README. | user (Q15) | Added at Stage 13 |
@@ -2081,18 +2082,27 @@ It enforces, and raises `StepBuildError` on violation (the case then goes to `ho
 - `downstream_delivery_service`, `search_index_service` and `readback_collector` emit `record_lookup` lines that carry a separate `system="account_service"` field;
 - `support_replica` reports `support_*` resources.
 
-Precedence, implemented once in `config.SYSTEM_RESOLUTION`:
+Precedence (A.8.1 Q-OWNER-RESOLUTION), implemented once in `audit/ownership.py`, with constants in `config`:
 
-1. An explicit owner field on the observation: `system`, `data_store`, `origin_system`, or the owning table/collection of a SQL row.
-2. A reporter-service alias map: `profile_service → account_service`, `support_replica → support_platform`, … Each entry is labelled [ASSUMPTION].
-3. Prefix map (above): consistency check only.
+1. **Explicit, valid owner field** on the observation: `system`, `data_store`, `origin_system`, or the owning table of a SQL row. The value must be in `config.CANONICAL_SYSTEMS`. A non-canonical value is recorded and ignored.
+2. **Evidence-backed alias** of `reporter_service` (`config.SYSTEM_ALIASES`: `profile_service → account_service`, `support_replica → support_platform`; [ASSUMPTION], approved).
+3. **`reporter_service` exactly equal** to a canonical system ID.
+4. **Never decides:** prefix map (above), partial or similar names, timing. The prefix map is a consistency check only.
+
+`config.CANONICAL_SYSTEMS` = the ten values that appear as explicit owner fields in participant evidence [FACT, Stage 4 survey]: `account_service`, `analytics_platform`, `backup_service`, `export_service`, `identity_service`, `integration_service`, `legal_service`, `search_service`, `security_service`, `support_platform`.
+
+Activity `target_system` values are claims and are not used to extend this list.
 
 | Outcome | Result |
 |---|---|
-| Rule 1 values across admissible observations agree | `system_id` = that value |
+| Rule 1 values across the resource's observations agree | `system_id` = that value (basis `EXPLICIT`) |
 | Rule 1 values disagree | `SYSTEM_AMBIGUOUS` → the case is held (A.8.4) |
-| Rule 1 absent, rule 2 present | `system_id` from the alias, with confidence MEDIUM |
-| Only rule 3 available | `SYSTEM_AMBIGUOUS` → held. A prefix never decides an output field alone, consistent with D.1.1. |
+| Rule 1 present, rules 2/3 disagree with it | Rule 1 wins; the disagreement is recorded as a note. [FACT] This happens 74 times in current data, always with a non-canonical reporter such as `search_index_service`. |
+| Rule 1 absent; rules 2 ∪ 3 give exactly one system | `system_id` = that system (basis `ALIAS` or `REPORTER_EXACT`) |
+| Rule 1 absent; rules 2 ∪ 3 give more than one system | `SYSTEM_AMBIGUOUS` → held |
+| Nothing from rules 1–3 | `SYSTEM_AMBIGUOUS` → held |
+
+`reporter_service` is used **only** for owner resolution. It never creates an identity link or scope membership (C.5).
 
 #### F.1.4 Output order vs action dependencies
 
@@ -2539,7 +2549,7 @@ Each stage is small enough to inspect and test on its own. A stage starts only w
 | 1 | M1 loader (A.1.4, B.5 M1) | 0 | Real dataset loads with 0 errors; row counts reported; each check has a failing fixture; `sample_output.csv` rejected by the allow-list |
 | 2 | SQL + JSON parsers → `Observation`s, coverage units, inner times, anomaly flags, nested hits, `FileExtraction` | 1 | All 24 SQL and 28 JSON files parse with a status and counts. SQL header vs manifest checked. The evidence_13/36 anomalies are flagged. Provenance tests pass. |
 | 3 | Log + TXT parsers (4 line formats + pipe), trace grouping, trace keys, identifier extraction (C.3) | 2 | All 26 logs and the TXT parse. Any non-OK status is explained. Started-line keys are attached as `TRACE_KEY`. Free-text identifiers are found. Normalisation keeps raw values. |
-| 4 | Stdlib PDF extractor (B.1.2); media-cache reader with SHA verification (B.1.3); `ObservationIndex` | 3 | 4 PDFs OK. 11 PNGs reported as `EVIDENCE_GAP` until an authorized cache exists. |
+| 4 | Stdlib PDF extractor (B.1.2) with page-level provenance; local media-cache reader with SHA/prompt/schema verification (B.1.3, no external calls); `ObservationIndex`; owner resolution (F.1.3, Q-OWNER-RESOLUTION) | 3 | 4 PDFs OK. 11 PNGs reported as `EVIDENCE_GAP` until an authorized cache exists. Index lookups deterministic, with no merging of observations. Owner-resolution tests pass. |
 | 5 | M3 identity + associations (C.4) | 1 | 518/518 and 32/32 resolution reported as data metrics; reuse/ambiguity fixtures |
 | 6 | M5 links, scope rules I1–I5/E1–E3, admissibility (C.7), workflow candidates (C.6), episode (`prior_request`) | 4, 5 | C.7 ten-row table tests; every included/excluded resource has a reason code |
 | 7 | M4 classification (D.1), conditions (D.2), dimensions and verdicts (B.4, D.3, single-observation proof), omission (C.8), conflicts (E.3.1) | 6 | Unit tests for D.1–D.3, C.8 and E.3.1; Q-D-ASSUMPTIONS edge tests |
@@ -2568,7 +2578,7 @@ Each stage is small enough to inspect and test on its own. A stage starts only w
 | R11 | Retained record missing | D.3.9 | No operation to express it | Held (Q7) | D-6 tests |
 | R12 | Intent ambiguity | E.1; 10 non-deletion inputs | Wrong NOT_APPLICABLE | Clause-scoped classifier; UNSURE → held; LLM off (Q14) | E.1.3 tests |
 | R13 | Media gap | 11 PNGs; transmission not authorized | Missing links for evaluation subjects | `EVIDENCE_GAP` reported (Q13) | Coverage report |
-| R14 | System naming | F.1.3 | Field mismatch | Owner fields first, then aliases (Q12); else `SYSTEM_AMBIGUOUS` | F.1.3 tests |
+| R14 | System naming | F.1.3 | Field mismatch | Explicit owner → alias → exact canonical reporter (Q12, Q-OWNER-RESOLUTION); else `SYSTEM_AMBIGUOUS` | `test_ownership.py` |
 | R15 | Held vs 518 rows | A.8.3 | No compliant output | All-or-nothing writer; X-HELD-MAPPING | I-2…I-7 |
 | R16 | Sort interpretation | Q-SORT | Ordering penalty | Numeric (Q16) | X-SORT-CONFIRM |
 | R17 | Shared-function validation blind spots | F.4 caveat | Validator passes buggy logic | Fixture unit tests + sample evaluator | G |
