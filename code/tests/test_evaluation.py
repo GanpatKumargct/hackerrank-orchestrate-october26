@@ -39,6 +39,16 @@ class TestMetrics(unittest.TestCase):
         pred = [self.EXP[0], self.EXP[0]]
         self.assertEqual(len(align(pred, self.EXP[:1], key_k)), 1)
 
+    def test_held_case_never_scores_even_against_empty_expected(self):
+        held = case_metrics(None, [], "NOT_APPLICABLE", [])
+        self.assertEqual((held["status_correct"], held["sequence_exact"], held["sequence_lcs_ratio"],
+                          held["resource_coverage"]), (False, False, 0.0, 0.0))
+        emitted = case_metrics("NOT_APPLICABLE", [], "NOT_APPLICABLE", [])
+        self.assertEqual((emitted["status_correct"], emitted["sequence_exact"], emitted["sequence_lcs_ratio"],
+                          emitted["resource_coverage"]), (True, True, 1.0, 1.0))
+        agg = aggregate({"h": held, "e": emitted})
+        self.assertEqual((agg["sequence_exact"], agg["sequence_lcs_mean"]), (0.5, 0.5))
+
     def test_lcs_and_false_complete(self):
         self.assertEqual(lcs([1, 2, 3, 4], [1, 3, 4]), 3)
         agg = aggregate({"a": case_metrics("COMPLETE", [], "INCOMPLETE", self.EXP),
@@ -76,6 +86,20 @@ class TestEdgeCases(StateCase):
                                  context={"level": level})
             verdicts.add(self.run_assess("backup_90430", [o]).verdict)
         self.assertEqual(verdicts, {"VIOLATION_PROVEN"})
+
+
+class TestProvenance(unittest.TestCase):
+    def test_fingerprint_is_stable_and_dirty_state_is_reported(self):
+        from evaluation import main as ev
+        fp = ev._code_fingerprint()
+        self.assertRegex(fp, r"^[0-9a-f]{64}$")
+        self.assertEqual(fp, ev._code_fingerprint())
+        dirty = ev._git_dirty_paths()
+        self.assertTrue(dirty is None or isinstance(dirty, list))
+        self.assertIn("does not identify the executed code",
+                      ev._provenance_note({"git_dirty": True, "dirty_paths": ["code/x.py"]}))
+        self.assertIn("identifies the executed code", ev._provenance_note({"git_dirty": False, "dirty_paths": []}))
+        self.assertIn("not available", ev._provenance_note({"git_dirty": None, "dirty_paths": []}))
 
 
 class TestEvaluatorGuards(unittest.TestCase):

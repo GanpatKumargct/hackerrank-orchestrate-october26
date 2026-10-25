@@ -1911,3 +1911,88 @@ repo_root=D:\Hackathon\HackerRank Hack
 worktree=main
 parent_agent=none
 
+## [2026-10-25T05:10:15Z] Clarification requested for ambiguous message
+
+User Prompt (verbatim, secrets redacted):
+366
+
+Agent Response Summary:
+The message "366" has no clear referent (a line number, a count, a case_id, or a selection), so no action was taken and the user was asked what they meant. No files other than this log entry were changed; Stage 11 not started. The previous read-only review turn was intentionally not logged because the user prohibited log changes for that turn.
+
+Actions:
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
+## [2026-10-25T05:18:14Z] Stage 10 post-review fixes: metrics provenance and held-case scoring
+
+User Prompt (verbatim, secrets redacted):
+Stage 10 close kar sakte hain, lekin Stage 11 shuru karne se pehle 2 important gaps fix karne ke liye approval lena better hai:
+1. Metrics provenance: evaluator run ke waqt code uncommitted tha, isliye recorded commit 386f8a6 actual executed code ko identify nahi karta.
+2. Held-case scoring bug: expected NOT_APPLICABLE wale held case ko sequence/LCS metrics mein galat perfect score mil sakta hai.
+
+(Approval obtained via question: "Dono fix karo (Recommended)".)
+
+Agent Response Summary:
+Proposed exact fixes and obtained approval for both. Evaluator now records git_dirty, dirty_paths (code/ only, excluding __pycache__) and a code_fingerprint (SHA-256 of code/**/*.py taken before the run), and evaluation_metrics.md states whether the recorded commit identifies the executed code; metrics.case_metrics now scores a held case 0 for sequence_exact, LCS and resource coverage even when the expected list is empty, leaving emitted cases unchanged. Added 2 tests; full suite 215 tests OK. A verification evaluator run into the session scratchpad flagged the dirty tree correctly and produced unchanged public-sample metrics (samples contain no expected NOT_APPLICABLE); a __pycache__ false-dirty issue found in that run was fixed. Plan G.7 records both fixes and that run 20261025T050029Z_evaluation's recorded commit does not identify its code; the authoritative clean-tree rerun awaits the owner's commit. Stage 9 artifacts unchanged; no output.csv; Stage 11 not started; nothing committed.
+
+Actions:
+* Asked approval (AskUserQuestion): both fixes approved
+* Edited code/evaluation/main.py (provenance helpers, report note, console line), code/evaluation/metrics.py (held-case scoring), code/tests/test_evaluation.py (2 tests)
+* Edited docs/IMPLEMENTATION_PLAN.md (G.7 post-review fixes)
+* Ran python -m unittest discover -s code/tests -t code (215 tests OK, twice); evaluator verification run into the scratchpad (exit 0)
+* Verified runs/20261025T024207Z/* SHA-256 unchanged
+* Removed generated __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+
+## [2026-10-25T05:24:49Z] Stage 10.1 commit preparation (review only, no commit)
+
+User Prompt (verbatim, secrets redacted):
+Prepare the Stage 10.1 fixes for a clean-tree provenance run.
+
+1. Review `git status`, the complete diff, and the Stage 10.1 changes in:
+   - `code/evaluation/main.py`
+   - `code/evaluation/metrics.py`
+   - `code/tests/test_evaluation.py`
+   - `docs/IMPLEMENTATION_PLAN.md`
+   - `log.txt`
+
+2. Confirm that only intended Stage 10.1 changes are included. Do not stage unrelated files, generated run artifacts, `output.csv`, or anything inside `ganpat-hackrank-hack/`.
+
+3. Re-run the full test suite and report the result.
+
+4. **Do not create a commit yet.** Report the exact files and diff summary intended for the commit, then stop and wait for my approval.
+
+5. Do not start Stage 11, generate root `output.csv`, or modify Stage 9 artifacts. Do not alter approved rules or the dataset.
+
+Agent Response Summary:
+Reviewed git status and the full diff: exactly five modified tracked files, all Stage 10.1 (evaluator provenance helpers and report note, held-case scoring fix, two tests, plan G.7 note, appended log entries); no untracked files, runs/ is ignored, no output.csv, nothing staged, no other paths. Found two pre-existing CRLF line endings in old log.txt lines (386, 407) that are not part of the diff and will be normalized to LF by core.autocrlf=input on staging; numstat shows 48 additions and 0 deletions for log.txt (before this entry). Full suite 215 tests OK; Stage 9 artifact hashes unchanged. No commit created; waiting for approval.
+
+Actions:
+* Ran git status, git diff (stat, per-file, numstat, CRLF checks)
+* Ran python -m unittest discover -s code/tests -t code (215 tests OK)
+* Verified runs/20261025T024207Z/* SHA-256 unchanged; removed __pycache__ folders
+* Appended this entry to log.txt
+
+Context:
+tool=Claude Code
+model=claude-opus-5-5[1m]
+branch=main
+repo_root=D:\Hackathon\HackerRank Hack
+worktree=main
+parent_agent=none
+

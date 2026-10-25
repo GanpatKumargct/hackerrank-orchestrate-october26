@@ -2734,7 +2734,14 @@ The earlier G statements ("no finding ⇒ COMPLETE", "all emails resolve" as an 
   | E-16 | `test_decision.test_d7_*` |
   | E-17 | `test_decision.test_d9_*` |
 
-- **Run facts [FACT, `runs/20261025T050029Z_evaluation`, commit 386f8a6].**
+- **Post-review fixes (approved after the Stage 10 review).**
+  - **Provenance.** `meta` now records `git_dirty`, `dirty_paths` (`git status --porcelain -- code`, excluding `__pycache__`) and `code_fingerprint`. The fingerprint is the SHA-256 of every `code/**/*.py`, taken from relative path plus content before the run starts. `evaluation_metrics.md` states whether the recorded commit identifies the executed code.
+    - [FACT] The run `20261025T050029Z_evaluation` recorded commit 386f8a6 while the Stage 10 code was still uncommitted. That commit therefore does **not** identify the code that produced those metrics.
+    - A clean-tree evaluator run, after the owner commits, gives the authoritative provenance.
+  - **Held-case scoring.** In `metrics.case_metrics`, a held case now always scores `sequence_exact=False`, `sequence_lcs_ratio=0.0` and `resource_coverage=0.0`. Before the fix, a held case with an empty expected list (expected NOT_APPLICABLE) scored 1.0. An emitted case that matches is unchanged.
+    - [FACT] The samples contain no expected NOT_APPLICABLE, so the public-sample metrics are unchanged (verified by re-running the evaluator into the session scratchpad).
+  - Tests: `test_held_case_never_scores_even_against_empty_expected`, `test_fingerprint_is_stable_and_dirty_state_is_reported`.
+- **Run facts [FACT, `runs/20261025T050029Z_evaluation`; recorded commit 386f8a6 does not contain the executed Stage 10 code — see the provenance fix above].**
   - Public samples: status accuracy 0.0938 (3/32); false-COMPLETE 0; COMPLETE invariant failures 0; invalid citations 0; held rate 0.9062.
   - Steps: precision 1.0, recall 0.0518, F1 0.0985 (10 of 193 expected steps strictly matched). Field accuracy 1.0 on every aligned pair. Citation accuracy 1.0.
   - Sequences: exact 0.0312; mean LCS 0.0781. Internal REQ-decided ratio 0.7922.

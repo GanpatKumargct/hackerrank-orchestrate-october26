@@ -56,6 +56,30 @@ def _git_commit():
         return "not available"
 
 
+def _git_dirty_paths():
+    """Uncommitted changes under code/ (A.6 provenance). None when git is unavailable."""
+    try:
+        out = subprocess.run(["git", "status", "--porcelain", "--", "code"], cwd=config.REPO_ROOT,
+                             capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0:
+        return None
+    paths = (line[3:].strip() for line in out.stdout.splitlines() if line.strip())
+    return sorted(p for p in paths if "__pycache__" not in p)      # bytecode caches are not code
+
+
+def _code_fingerprint():
+    """SHA-256 over every code/**/*.py (relative path + content): identifies the executed code."""
+    code = config.REPO_ROOT / "code"
+    h = hashlib.sha256()
+    for p in sorted(code.rglob("*.py")):
+        if "__pycache__" in p.parts:
+            continue
+        h.update(p.relative_to(code).as_posix().encode("utf-8") + b"\0" + p.read_bytes() + b"\0")
+    return h.hexdigest()
+
+
 def _check(results, ctx):
     """L1/L2 per case + L3/L4 for emitted results: (invalid citations, COMPLETE invariant failures, errors)."""
     invalid, bad_complete, errors = 0, 0, {}
@@ -157,10 +181,21 @@ def evaluate(dataset_dir, stage_run):
     return out
 
 
+def _provenance_note(meta):
+    if meta["git_dirty"] is None:
+        return "git status not available — the recorded commit may not identify the executed code."
+    if meta["git_dirty"]:
+        return (f"**Uncommitted changes under code/ ({len(meta['dirty_paths'])} paths) — the recorded commit does "
+                "not identify the executed code; use the code fingerprint.**")
+    return "Working tree clean under code/: the recorded commit identifies the executed code."
+
+
 def _md(res, meta):
     a, st = res["samples"]["aggregate"], res["stage_run"]
+    prov = _provenance_note(meta)
     L = ["# Stage 10 evaluation metrics", "",
          f"Generated {meta['generated_at']} by `{meta['command']}` at git commit `{meta['git_commit']}`.",
+         f"Code fingerprint (SHA-256 of code/**/*.py): `{meta['code_fingerprint']}`. {prov}", "",
          "Offline, deterministic, no model calls. **Public-sample metrics only**; no hidden-test score is "
          "estimated. Held cases count as incorrect and contribute no predicted steps.", "",
          "## Acceptance", ""]
@@ -218,8 +253,11 @@ def main(argv=None):
     out_dir = out_dir.resolve()
     if out_dir == config.REPO_ROOT.resolve() or (stage_run is not None and out_dir == Path(stage_run).resolve()):
         raise SystemExit("refusing to write into the repository root or the Stage 9 run directory")
+    dirty, fingerprint = _git_dirty_paths(), _code_fingerprint()   # taken before the run, describes the code it uses
     res = evaluate(args.dataset, stage_run)
     meta = {"generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ"), "git_commit": _git_commit(),
+            "git_dirty": None if dirty is None else bool(dirty), "dirty_paths": dirty or [],
+            "code_fingerprint": fingerprint,
             "command": "python code/evaluation/main.py" + (" " + " ".join(argv) if argv else ""),
             "inputs": sorted(config.INPUT_FILES) + ["sample_output.csv (evaluation only)"],
             "stage_run": res["stage_run"].get("run_dir")}
@@ -229,6 +267,8 @@ def main(argv=None):
     (out_dir / "evaluation_metrics.md").write_text(_md(res, meta), encoding="utf-8", newline="\n")
     a = res["samples"]["aggregate"]
     print(f"output directory: {out_dir}")
+    print(f"provenance: commit {meta['git_commit']} dirty={meta['git_dirty']} "
+          f"fingerprint={meta['code_fingerprint'][:16]}…")
     print(f"samples: status_accuracy={a['status_accuracy']} false_complete={a['false_complete']} "
           f"invalid_citations={a['invalid_citations']} held_rate={a['held_rate']} step_f1={a['step_f1']} "
           f"confusion={a['confusion']}")

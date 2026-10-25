@@ -63,6 +63,7 @@ def case_metrics(pred_status, pred_steps, exp_status, exp_steps):
     pred_res = {s["resource_id"] for s in pred_steps}
     pt, et = [_tuple(s) for s in pred_steps], [_tuple(s) for s in exp_steps]
     denom = max(len(pt), len(et))
+    held = pred_status is None          # a held case never scores, even against an empty expected list
     return {
         "expected_status": exp_status,
         "predicted_status": pred_status or "HELD",
@@ -71,9 +72,9 @@ def case_metrics(pred_status, pred_steps, exp_status, exp_steps):
         "k2_pairs": len(k2_pairs), "field_hits": field_hits,
         "citation_pairs": len(cite_pairs), "citation_hits": sum(1 for p, e in cite_pairs
                                                                if p["evidence_id"] == e["evidence_id"]),
-        "sequence_exact": pt == et,
-        "sequence_lcs_ratio": (lcs(pt, et) / denom) if denom else 1.0,
-        "resource_coverage": (len(pred_res & exp_res) / len(exp_res)) if exp_res else 1.0,
+        "sequence_exact": not held and pt == et,
+        "sequence_lcs_ratio": 0.0 if held else ((lcs(pt, et) / denom) if denom else 1.0),
+        "resource_coverage": 0.0 if held else ((len(pred_res & exp_res) / len(exp_res)) if exp_res else 1.0),
         "unexpected_resources": sorted(pred_res - exp_res),
     }
 
